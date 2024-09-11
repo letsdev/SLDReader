@@ -1,6 +1,6 @@
 {
   "name": "@disy/sldreader",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "SLD reader and formatter for openlayers",
   "main": "dist/sldreader.js",
   "keywords": [
