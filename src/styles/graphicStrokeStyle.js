@@ -65,8 +65,8 @@ function renderStrokeMarks(
   }
 
   // We use the context as param and create the render object here, because we need to create deep copies later.
-  const render2 = render.toContext(renderContext);
-  patchRenderer(render2);
+  const render = toContext(renderContext);
+  patchRenderer(render);
 
   // The first element of the first pixelCoords entry should be a number (x-coordinate of first point).
   // If it's an array instead, then we're dealing with a multiline or (multi)polygon.
@@ -96,17 +96,22 @@ function renderStrokeMarks(
     return;
   }
 
+  let ogImageWidth = null;
+  if (ogImage.imgSize_) {
+    ogImageWidth = ogImage.imgSize_[0];
+  }
+
   const gapSize = graphicSpacing * pixelRatio;
 
   var splitPoints = splitLineString(
-    new geom.LineString(pixelCoords),
+    new LineString(pixelCoords),
     gapSize,
     {
       invertY: true, // Pixel y-coordinates increase downwards in screen space.
-      extent: render2.extent_,
+      extent: render.extent_,
       placement: options.placement,
       initialGap: options.initialGap,
-      graphicWidth: ogImage.iconImage_?.image_?.naturalWidth
+      graphicWidth: ogImageWidth
     }
   );
 
@@ -128,14 +133,9 @@ function renderStrokeMarks(
     return copy;
   }
 
-  let ogImageWidth;
-  if (ogImage.imgSize_) {
-    ogImageWidth = ogImage.imgSize_[0];
-  }
-
   // This loop renders the individual splitPoints.
   splitPoints.forEach((point) => {
-    let customRender = render2;
+    let customRender = render;
     let image;
 
     /* This whole function has some adjustment solely for the case of the graphic being wider than a segment of the geometry.
@@ -162,7 +162,7 @@ function renderStrokeMarks(
           const newVal = ogImageWidth * imageToSegmentRatio;
           image.iconImage_.size_[0] = newVal;
 
-          customRender = render.toContext(renderContext);
+          customRender = toContext(renderContext);
           patchRenderer(customRender);
         }
       }
@@ -172,7 +172,7 @@ function renderStrokeMarks(
 
     var splitPointAngle = image.getRotation() + point[2];
     customRender.setImageStyle2(image, splitPointAngle);
-    const pointToDraw = new geom.Point([point[0] / pixelRatio, point[1] / pixelRatio]);
+    const pointToDraw = new Point([point[0] / pixelRatio, point[1] / pixelRatio]);
     customRender.drawPoint(pointToDraw);
   });
 }
@@ -217,8 +217,6 @@ export function getGraphicStrokeRenderer(linesymbolizer, getProperty) {
     const pixelRatio = renderState.pixelRatio || 1.0;
 
     // TODO: Error handling, alternatives, etc.
-    // const render = toContext(renderState.context);
-    // patchRenderer(render);
     const renderContext = renderState.context;
 
     let defaultGraphicSize = DEFAULT_MARK_SIZE;
@@ -251,7 +249,6 @@ export function getGraphicStrokeRenderer(linesymbolizer, getProperty) {
     options.initialGap = getInitialGapSize(linesymbolizer);
 
     renderStrokeMarks(
-      // render,
       renderContext,
       pixelCoords,
       graphicSpacing,

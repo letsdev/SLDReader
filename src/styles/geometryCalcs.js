@@ -125,7 +125,7 @@ export function splitLineString(geometry, graphicSpacing, options = {}) {
       );
       // Only return split points that will be rendered (are in extent).
       if (!options.extent
-        || extent.containsCoordinate(options.extent, splitPointCoords)) {
+        || containsCoordinate(options.extent, splitPointCoords)) {
         splitPointCoords.push(angle);
         /*
          * If this is the only split point on this segment, we also add the current segment length. This might be used to 
@@ -174,7 +174,7 @@ export function splitLineString(geometry, graphicSpacing, options = {}) {
       // Only return split points that will be rendered (are in extent).
       if (
         !options.extent ||
-        extent.containsCoordinate(options.extent, splitPointCoords$1)
+        containsCoordinate(options.extent, splitPointCoords$1)
       ) {
         splitPointCoords$1.push(angle$1);
         // We don't add the segment length here, since the graphic is for sure not wider than the segment once we're in this else block. 
