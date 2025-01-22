@@ -2,17 +2,33 @@ import { containsCoordinate } from 'ol/extent';
 
 import { PLACEMENT_FIRSTPOINT, PLACEMENT_LASTPOINT } from '../constants';
 
+/**
+ * Euclidean distance between two points ([x, y]).
+ */
 function calculatePointsDistance(coord1, coord2) {
   const dx = coord1[0] - coord2[0];
   const dy = coord1[1] - coord2[1];
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-function calculateSplitPointCoords(startCoord, endCoord, distanceFromStart) {
-  const distanceBetweenNodes = calculatePointsDistance(startCoord, endCoord);
-  const d = distanceFromStart / distanceBetweenNodes;
-  const x = startCoord[0] + (endCoord[0] - startCoord[0]) * d;
-  const y = startCoord[1] + (endCoord[1] - startCoord[1]) * d;
+/**
+ * Calculates a point along the line between the provided startCoord and endCoord. The distance between the 
+ * startCoord and the resulting point will be exactly `distanceFromStart`. The resulting point will never lie
+ * outside of the provided segment. If a graphicWidth is provided, and this width is larger than the segment 
+ * length, the point will be placed exactly in the middle of the segment.
+ */
+function calculateSplitPointCoords(options) {
+  const startCoord = options.startCoord;
+  const endCoord = options.endCoord;
+  const distanceFromStart = options.distanceFromStart;
+
+  var distanceBetweenNodes = calculatePointsDistance(startCoord, endCoord);
+  let d = Math.max(Math.min(distanceFromStart / distanceBetweenNodes, 1), 0); // clamp this between 0 and 1 to prevent points outside of the segment
+  if (!!options.graphicWidth && options.graphicWidth > distanceBetweenNodes) {
+    d = 0.5;
+  }
+  var x = startCoord[0] + (endCoord[0] - startCoord[0]) * d;
+  var y = startCoord[1] + (endCoord[1] - startCoord[1]) * d;
   return [x, y];
 }
 
@@ -33,6 +49,10 @@ function calculateAngle(p1, p2, invertY) {
 }
 
 // eslint-disable-next-line import/prefer-default-export
+/**
+ * Creates a list of anchor points for images that will be rendered as a geometry line. Each point will be the center of 
+ * such an image. The returned "splitPoints" include coordinates, angle, and in certain cases the length of the segment the point is on. 
+ */
 export function splitLineString(geometry, graphicSpacing, options = {}) {
   const coords = geometry.getCoordinates();
 
@@ -49,55 +69,72 @@ export function splitLineString(geometry, graphicSpacing, options = {}) {
 
   // Handle first point placement case.
   if (options.placement === PLACEMENT_FIRSTPOINT) {
-    const p1 = coords[0];
-    const p2 = coords[1];
+    var p1 = coords[0];
+    var p2 = coords[1];
     return [[p1[0], p1[1], calculateAngle(p1, p2, options.invertY)]];
   }
 
   // Handle last point placement case.
   if (options.placement === PLACEMENT_LASTPOINT) {
-    const p1$1 = coords[coords.length - 2];
-    const p2$1 = coords[coords.length - 1];
+    var p1$1 = coords[coords.length - 2];
+    var p2$1 = coords[coords.length - 1];
     return [[p2$1[0], p2$1[1], calculateAngle(p1$1, p2$1, options.invertY)]];
   }
 
-  const gapSize = Math.max(graphicSpacing, 0.1); // 0.1 px minimum gap size to prevent accidents.
+  var gapSize = Math.max(graphicSpacing, 0.1); // 0.1 px minimum gap size to prevent accidents.
 
-  // Measure along line to place the next point.
-  // Can start at a nonzero value if initialGap is used.
-  let nextPointMeasure = gapSize / 2;
-  let pointIndex = 0;
-  const currentSegmentStart = [].concat(coords[0]);
-  const currentSegmentEnd = [].concat(coords[1]);
+  var pointIndex = 0;
+  var currentSegmentStart = [].concat(coords[0]);
+  var currentSegmentEnd = [].concat(coords[1]);
 
-  // Cumulative measure of the line where each segment's length is added in succession.
-  let cumulativeMeasure = 0;
+  var splitPoints = [];
 
-  const splitPoints = [];
+  let splitPointsOnThisSegment = 0;
 
   // Keep adding points until the next point measure lies beyond the line length.
   while (true) {
-    const currentSegmentLength = calculatePointsDistance(
+    var currentSegmentLength = calculatePointsDistance(
       currentSegmentStart,
-      currentSegmentEnd,
+      currentSegmentEnd
     );
-    // If the next point exceeds the line length (minus half the gapsize because we hook the image in the center, not the beginning),
-    // we go to the next segment.
-    if (cumulativeMeasure + currentSegmentLength < nextPointMeasure + gapSize / 2) {
 
-      const splitPointCoords = calculateSplitPointCoords(
-        currentSegmentEnd,
-        currentSegmentStart,
-        gapSize / 2
-      );
-      const angle = calculateAngle(
+    let distanceFromStart;
+
+    // If the next split point creates a line that is longer than the segment, it will be the last one on the segment. 
+    // May also be the only split point.
+    if ((splitPointsOnThisSegment + 1) * gapSize >= currentSegmentLength) {
+
+      if (splitPointsOnThisSegment === 0) {
+        // We put the first split point at the center of the first image, so half the gapsize away from the start.
+        distanceFromStart = 0.5 * gapSize;
+      } else {
+        // We put the last split point at the center of the last image, so half the gapsize away from the end.
+        distanceFromStart = currentSegmentLength - (0.5 * gapSize);
+      }
+
+      var splitPointCoords = calculateSplitPointCoords({
+        startCoord: currentSegmentStart,
+        endCoord: currentSegmentEnd,
+        distanceFromStart: distanceFromStart,
+        graphicWidth: gapSize
+      });
+      var angle = calculateAngle(
         currentSegmentStart,
         currentSegmentEnd,
         options.invertY
       );
+      // Only return split points that will be rendered (are in extent).
       if (!options.extent
-        || containsCoordinate(options.extent, splitPointCoords)) {
+        || extent.containsCoordinate(options.extent, splitPointCoords)) {
         splitPointCoords.push(angle);
+        /*
+         * If this is the only split point on this segment, we also add the current segment length. This might be used to 
+         * calculate the correct image width in the rendering loop that is calling this function, in case the image is
+         * wider than the whole segment.
+         */
+        if (splitPointsOnThisSegment === 0) {
+          splitPointCoords.push(currentSegmentLength);
+        }
         splitPoints.push(splitPointCoords);
       }
 
@@ -110,30 +147,40 @@ export function splitLineString(geometry, graphicSpacing, options = {}) {
       currentSegmentEnd[0] = coords[pointIndex + 2][0];
       currentSegmentEnd[1] = coords[pointIndex + 2][1];
       pointIndex += 1;
-      cumulativeMeasure = 0;
-      nextPointMeasure = gapSize / 2;
-    } else {
-      // Next point lies on the current segment.
-      // Calculate its position and increase next point measure by gap size.
-      const distanceFromSegmentStart = nextPointMeasure - cumulativeMeasure;
-      const splitPointCoords = calculateSplitPointCoords(
+      splitPointsOnThisSegment = 0;
+    } else { // The next split point does *not* exceed the segment length, so it won't be the last one.
+
+      if (splitPointsOnThisSegment === 0) {
+        // We put the first split point at the center of the first image, so half the gapsize away from the start.
+        distanceFromStart = 0.5 * gapSize;
+      } else {
+        // We put all other split points (except the last one, but that's handled in the `if` branch) 
+        // exactly "one image width apart" (== gapSize) from each other. Since `distanceFromStart` is the total length of the 
+        // line computet thus far, we include the half gapsize of the first point, hence `+ 0.5`.
+        distanceFromStart = (splitPointsOnThisSegment + 0.5) * gapSize;
+      }
+
+      // We don't need to provide the graphic width here, since it can never be longer than the segment once we're in the `else` block.
+      var splitPointCoords$1 = calculateSplitPointCoords({
+        startCoord: currentSegmentStart,
+        endCoord: currentSegmentEnd,
+        distanceFromStart: distanceFromStart
+      });
+      var angle$1 = calculateAngle(
         currentSegmentStart,
         currentSegmentEnd,
-        distanceFromSegmentStart,
+        options.invertY
       );
-      const angle = calculateAngle(
-        currentSegmentStart,
-        currentSegmentEnd,
-        options.invertY,
-      );
+      // Only return split points that will be rendered (are in extent).
       if (
         !options.extent ||
-        containsCoordinate(options.extent, splitPointCoords)
+        extent.containsCoordinate(options.extent, splitPointCoords$1)
       ) {
-        splitPointCoords.push(angle);
-        splitPoints.push(splitPointCoords);
+        splitPointCoords$1.push(angle$1);
+        // We don't add the segment length here, since the graphic is for sure not wider than the segment once we're in this else block. 
+        splitPoints.push(splitPointCoords$1);
       }
-      nextPointMeasure += gapSize;
+      splitPointsOnThisSegment++;
     }
   }
 
