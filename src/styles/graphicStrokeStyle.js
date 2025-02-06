@@ -53,7 +53,7 @@ function patchRenderer(renderer) {
  * @returns {void}
  */
 function renderStrokeMarks(
-  render,
+  renderContext,
   pixelCoords,
   graphicSpacing,
   pointStyle,
@@ -64,13 +64,17 @@ function renderStrokeMarks(
     return;
   }
 
+  // We use the context as param and create the render object here, because we need to create deep copies later.
+  const render = toContext(renderContext);
+  patchRenderer(render);
+
   // The first element of the first pixelCoords entry should be a number (x-coordinate of first point).
   // If it's an array instead, then we're dealing with a multiline or (multi)polygon.
   // In that case, recursively call renderStrokeMarks for each child coordinate array.
   if (Array.isArray(pixelCoords[0][0])) {
-    pixelCoords.forEach(pixelCoordsChildArray => {
+    pixelCoords.forEach(function (pixelCoordsChildArray) {
       renderStrokeMarks(
-        render,
+        renderContext,
         pixelCoordsChildArray,
         graphicSpacing,
         pointStyle,
@@ -87,26 +91,89 @@ function renderStrokeMarks(
   }
 
   // Don't render anything when the pointStyle has no image.
-  const image = pointStyle.getImage();
-  if (!image) {
+  const ogImage = pointStyle.getImage();
+  if (!ogImage) {
     return;
   }
 
-  const splitPoints = splitLineString(
+  let ogImageWidth = null;
+  if (ogImage.imgSize_) {
+    ogImageWidth = ogImage.imgSize_[0];
+  }
+
+  const gapSize = graphicSpacing * pixelRatio;
+
+  var splitPoints = splitLineString(
     new LineString(pixelCoords),
-    graphicSpacing * pixelRatio,
+    gapSize,
     {
       invertY: true, // Pixel y-coordinates increase downwards in screen space.
       extent: render.extent_,
       placement: options.placement,
       initialGap: options.initialGap,
+      graphicWidth: ogImageWidth
     }
   );
 
-  splitPoints.forEach(point => {
-    const splitPointAngle = image.getRotation() + point[2];
-    render.setImageStyle2(image, splitPointAngle);
-    render.drawPoint(new Point([point[0] / pixelRatio, point[1] / pixelRatio]));
+  // Not quite a deep clone, but deep cloning the properties we need for rendering. 
+  // We do this to not affect all individually rendered images when adjusting some of them.
+  const deepCloneImage = (image) => {
+    const copy = image.clone();
+
+    copy.imgSize_ = structuredClone(image.imgSize_);
+    copy.iconImage_ = new image.iconImage_.__proto__.constructor(
+      image.iconImage_.image_,
+      image.iconImage_.src_,
+      [image.iconImage_.size_[0], image.iconImage_.size_[1]],
+      image.iconImage_.crossOrigin_,
+      image.iconImage_.imageState_,
+      image.iconImage_.color_
+    );
+
+    return copy;
+  }
+
+  // This loop renders the individual splitPoints.
+  splitPoints.forEach((point) => {
+    let customRender = render;
+    let image;
+
+    /* This whole function has some adjustment solely for the case of the graphic being wider than a segment of the geometry.
+     * Whenever this case occurs, we change the width of the image that will be rendered for the respective split point.
+     * The condition for this case is as follows: `gapSize > segmentLength`, where gapSize is the graphic width in the pixel 
+     * space that's used for the splitLineString computation (which produces the splitPoints array), and segmentLength is the 
+     * length of the segment that might be too short for the graphic (same pixel space as `gapSize`). 
+     * To adjust the image size, we need to apply the ratio of `segmentLength / gapSize` (short segment length / long graphic width)
+     * to the actual graphic size, since the graphic width is given in a different pixel space. The resulting value will be the 
+     * length of the segment in the pixelspace of the graphic, making the graphic exactly as long as the segment. 
+     * (i.e. if `segmentLength` is 2/3 of `gapSize`, we want the image to be rendered 2/3 as wide as the original)
+     * For the rendering to work correctly, we need to use a separate render object. Otherwise the image size will be applied to 
+     * every rendered image, due to the static way the render object holds the size information. We create a deep copy of the
+     * render object for this purpose (only the properties that we require are properly deep copied).
+     */
+    if (ogImage.iconImage_) {
+      image = deepCloneImage(ogImage);
+
+      const hasSegmentLength = point.length > 3;
+      if (hasSegmentLength) {
+        const segmentLength = point[3];
+        if (gapSize > segmentLength) {
+          const imageToSegmentRatio = (segmentLength / gapSize);
+          const newVal = ogImageWidth * imageToSegmentRatio;
+          image.iconImage_.size_[0] = newVal;
+
+          customRender = toContext(renderContext);
+          patchRenderer(customRender);
+        }
+      }
+    } else {
+      image = ogImage;
+    }
+
+    var splitPointAngle = image.getRotation() + point[2];
+    customRender.setImageStyle2(image, splitPointAngle);
+    const pointToDraw = new Point([point[0] / pixelRatio, point[1] / pixelRatio]);
+    customRender.drawPoint(pointToDraw);
   });
 }
 
@@ -150,8 +217,7 @@ export function getGraphicStrokeRenderer(linesymbolizer, getProperty) {
     const pixelRatio = renderState.pixelRatio || 1.0;
 
     // TODO: Error handling, alternatives, etc.
-    const render = toContext(renderState.context);
-    patchRenderer(render);
+    const renderContext = renderState.context;
 
     let defaultGraphicSize = DEFAULT_MARK_SIZE;
     if (graphicstroke.graphic && graphicstroke.graphic.externalgraphic) {
@@ -183,7 +249,7 @@ export function getGraphicStrokeRenderer(linesymbolizer, getProperty) {
     options.initialGap = getInitialGapSize(linesymbolizer);
 
     renderStrokeMarks(
-      render,
+      renderContext,
       pixelCoords,
       graphicSpacing,
       pointStyle,
