@@ -53,7 +53,21 @@ export default {
   plugins: [
     babel({
       babelHelpers: 'bundled',
-      presets: ['@babel/preset-env']
+      // Keep output close to source for readability: modern target, avoid generator transforms.
+      presets: [
+        [
+          '@babel/preset-env',
+          {
+            targets: { esmodules: true },
+            bugfixes: true,
+            modules: false,
+            exclude: [
+              'transform-async-to-generator',
+              'transform-regenerator',
+            ],
+          },
+        ],
+      ],
     }),
     nodeResolve()
   ],
