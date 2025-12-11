@@ -150,9 +150,9 @@ async function renderStrokeMarks(
 
   let ogImageWidth = null;
   let ogImageHeight = null;
-  if (ogImage.imgSize_) {
-    ogImageWidth = ogImage.imgSize_[0];
-    ogImageHeight = ogImage.imgSize_[1];
+  if (ogImage.getSize()) {
+    ogImageWidth = ogImage.getSize()[0];
+    ogImageHeight = ogImage.getSize()[1];
   }
 
   const gapSize = graphicSpacing * pixelRatio;
@@ -501,7 +501,6 @@ async function handleRightTurn(options) {
   const pImageWidth = options.pImageWidth;
   const pImageHeight = options.pImageHeight;
   const pRenderContext = options.pRenderContext;
-  const pPixelRatio = options.pPixelRatio;
   const ogImageWidth = options.ogImageWidth;
   const ogImageHeight = options.ogImageHeight;
   const splitPoint = options.splitPoint;
@@ -1279,10 +1278,15 @@ function createOlIconWithDataURL(options) {
 
   const tempImg = new Image();
   tempImg.src = src;
+  if (imgSize && imgSize[0] && imgSize[1]) {
+    tempImg.width = imgSize[0];
+    tempImg.height = imgSize[1];
+  }
 
   const icon = new Icon({
     img: tempImg,
-    imgSize: imgSize,
+    imgSize: imgSize,    
+    size: imgSize, // OL10 needs size when img is provided
     scale: scale,
     anchor: anchor,
     anchorXUnits: 'fraction',
