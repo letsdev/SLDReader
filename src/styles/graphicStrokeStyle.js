@@ -370,7 +370,6 @@ function getTurnHandlerOptions(options, overrides = {}) {
     pImageWidth: options.ogImageWidth,
     pImageHeight: options.ogImageHeight,
     pRenderContext: options.renderContext,
-    pPixelRatio: options.pixelRatio,
     ogImageWidth: options.ogImageWidth,
     ogImageHeight: options.ogImageHeight,
     gapSize: options.gapSize,
@@ -599,43 +598,25 @@ async function handleTurn(options) {
   for (let i = 0; i < 2; i++) {
     const gapCloserPoint = gapCloserPoints[i];
 
-    //let gapCloserImage = await deepCloneImage(pImage);
-
     // This happens when the angle is so narrow, that the length of the corner is larger than the image width.
     // We cannot sensibly cut here, we'd have to add another point. Instead, we cut the second half in the beginning to match the first.
     if (!gapCloserPoint.isFirst && gapCloserPoints[0].cutLength > pImageWidth) {
       gapCloserPoint.cutInFront = gapCloserPoints[0].cutLength - pImageWidth;
     }
 
-    let gapCloserImage = new Image();
-    gapCloserImage.src = pImage.iconImage_.src_;
-    document.body.appendChild(gapCloserImage);
-
-    const clippedSrc = await getClippedImageForTurn({
-      img: gapCloserImage,
-      clipInfo: gapCloserPoint,
-      canvasWidth: ogImageWidth,
-      canvasHeight: ogImageHeight,
-      turnDirection,
-    });
     const imageAnchor = gapCloserPoint.isFirst
       ? [0, 0.5]
       : [1, 0.5];
-    gapCloserImage = createOlIconWithDataURL({
-      src: clippedSrc,
-      imgSize: [pImageWidth, pImageHeight],
-      scale: pImage.getScale(),
+    const gapCloserImage = await clipToIcon({
+      imageStyle: pImage,
+      clipper: getClippedImageForTurn,
+      clipInfo: gapCloserPoint,
+      canvasSize: [ogImageWidth, ogImageHeight],
+      clipperOptions: {
+        turnDirection,
+      },
       anchor: imageAnchor,
     });
-    // gapCloserImage = new Icon({
-    //   src: clippedSrc,
-    //   imgSize: [pImageWidth, pImageHeight],
-    //   scale: pImage.getScale(),
-    //   anchor: imageAnchor,
-    //   anchorXUnits: 'fraction',
-    //   anchorYUnits: 'fraction',
-    // });
-    // gapCloserImage.getImage(pPixelRatio).src = clippedSrc;
 
     const gapCloserRenderer = toContext(pRenderContext);
 
@@ -663,34 +644,14 @@ async function handleTurn(options) {
   const nextSegmentClipInfo = {
     cutLength: nextSegmentCutLength,
   };
-  //const clonedImage = await deepCloneImage(pImage);
-  const img = new Image();
-  // img.src = clonedImage.getSrc();
-  img.src = pImage.iconImage_.src_;
-  document.body.appendChild(img);
-
-  const nextSegmentClippedSrc = await getClippedImageNoAngle({
-    img: img,
-    clipInfo: nextSegmentClipInfo,
-    canvasWidth: ogImageWidth,
-    canvasHeight: ogImageHeight,
-  });
   const nextSegmentImageAnchor = [0, 0.5];
-  const nextSegmentImage = createOlIconWithDataURL({
-    src: nextSegmentClippedSrc,
-    imgSize: [pImageWidth, pImageHeight],
-    scale: pImage.getScale(),
+  const nextSegmentImage = await clipToIcon({
+    imageStyle: pImage,
+    clipper: getClippedImageNoAngle,
+    clipInfo: nextSegmentClipInfo,
+    canvasSize: [ogImageWidth, ogImageHeight],
     anchor: nextSegmentImageAnchor,
   });
-  // const nextSegmentImage = new Icon({
-  //   src: nextSegmentClippedSrc,
-  //   imgSize: [pImageWidth, pImageHeight],
-  //   scale: pImage.getScale(),
-  //   anchor: nextSegmentImageAnchor,
-  //   anchorXUnits: 'fraction',
-  //   anchorYUnits: 'fraction',
-  // });
-  // nextSegmentImage.getImage(pPixelRatio).src = nextSegmentClippedSrc;
 
   const nextSegmentRenderer = toContext(pRenderContext);
 
@@ -718,23 +679,20 @@ async function handleRegularButShortened(options) {
   const point = options.point;
   const gapSize = options.gapSize;
   const ogImageWidth = options.ogImageWidth;
-  const ogImageHeight = options.ogImageHeight;
   const ogImage = options.ogImage;
-  const pixelRatio = options.pixelRatio;
   let image = options.image;
   const renderCoords = options.renderCoords;
   const customRender = options.customRender;
   const currentGeometryCoordIndex = options.currentGeometryCoordIndex;
 
-  //image = await deepCloneImage(ogImage);
-  const img = new Image();
-  // img.src = image.getSrc();
-  img.src = ogImage.iconImage_.src_;
-  document.body.appendChild(img);
   const cutRatio = point.segmentLength / gapSize;
   const cutLength = cutRatio * ogImageWidth;
-  const clippedSrc = await getClippedImageNoAngle({
-    img: img,
+  const imageAnchor = point.isFirstOfGeometry
+    ? [0.5, 0.5]
+    : [0, 0.5];
+  image = await clipToIcon({
+    imageStyle: ogImage,
+    clipper: getClippedImageNoAngle,
     clipInfo: {
       cutLength: point.isFirstOfGeometry
         ? ogImageWidth - cutLength
@@ -742,27 +700,9 @@ async function handleRegularButShortened(options) {
       cutInFront: false,
       cutOnBothEnds: point.isFirstOfGeometry,
     },
-    canvasWidth: ogImageWidth,
-    canvasHeight: ogImageHeight,
-  });
-  const imageAnchor = point.isFirstOfGeometry
-    ? [0.5, 0.5]
-    : [0, 0.5];
-  image = createOlIconWithDataURL({
-    src: clippedSrc,
-    imgSize: [ogImageWidth, ogImageHeight],
-    scale: ogImage.getScale(),
+    canvasSize: [ogImageWidth, options.ogImageHeight],
     anchor: imageAnchor,
   });
-  // image = new Icon({
-  //   src: clippedSrc,
-  //   imgSize: [ogImageWidth, ogImageHeight],
-  //   scale: ogImage.getScale(),
-  //   anchor: imageAnchor,
-  //   anchorXUnits: 'fraction',
-  //   anchorYUnits: 'fraction',
-  // });
-  // image.getImage(pixelRatio).src = clippedSrc;
 
   const result = [
     {
@@ -811,20 +751,11 @@ async function handleHalfImageLeftTurn(options) {
     cutAngle,
   };
 
-  const img = new Image();
-  img.src = ogImage.iconImage_.src_;
-  document.body.appendChild(img);
-  const clippedSrc = await getClippedImageForLeftTurn({
-    img,
+  const image = await clipToIcon({
+    imageStyle: ogImage,
+    clipper: getClippedImageForLeftTurn,
     clipInfo,
-    canvasWidth: ogImageWidth,
-    canvasHeight: ogImageHeight,
-  });
-
-  const image = createOlIconWithDataURL({
-    src: clippedSrc,
-    imgSize: [ogImageWidth, ogImageHeight],
-    scale: ogImage.getScale(),
+    canvasSize: [ogImageWidth, ogImageHeight],
     anchor: [0.5, 0.5],
   });
 
@@ -838,23 +769,14 @@ async function handleHalfImageLeftTurn(options) {
       cutHeight: 0.5 * ogImageHeight,
       cutAngle,
     };
-    const imgLeft = new Image();
-    imgLeft.src = firstHalfOfLeftTurnRenderData.image.iconImage_.src_;
-    document.body.appendChild(imgLeft);
-    const firstHalfOfLeftTurnClippedSrc = await getClippedImageForLeftTurn({
-      img: imgLeft,
+    firstHalfOfLeftTurnRenderData.image = await clipToIcon({
+      imageStyle: firstHalfOfLeftTurnRenderData.image,
+      clipper: getClippedImageForLeftTurn,
       clipInfo: adjustingClipInfo,
-      canvasWidth: ogImageWidth,
-      canvasHeight: ogImageHeight,
-    });
-    const firstHalfOfLeftTurnImageAnchor = firstHalfOfLeftTurnRenderData.fromSplitPoint.isFirstOfGeometry
-      ? [0.5, 0.5]
-      : firstHalfOfLeftTurnRenderData.image.anchor_;
-    firstHalfOfLeftTurnRenderData.image = createOlIconWithDataURL({
-      src: firstHalfOfLeftTurnClippedSrc,
-      imgSize: [ogImageWidth, ogImageHeight],
-      scale: ogImage.getScale(),
-      anchor: firstHalfOfLeftTurnImageAnchor,
+      canvasSize: [ogImageWidth, ogImageHeight],
+      anchor: firstHalfOfLeftTurnRenderData.fromSplitPoint.isFirstOfGeometry
+        ? [0.5, 0.5]
+        : firstHalfOfLeftTurnRenderData.image.anchor_,
     });
 
     const hasRenderDataBeforeTurnOnSameSegment = pointsDataToRender.length - 2 >= 0
@@ -866,22 +788,14 @@ async function handleHalfImageLeftTurn(options) {
         point.splitPointCoords,
       ) / gapSize;
       const lastRenderDataBeforeTurnCutLength = lastRenderDataBeforeTurnCutRatio * ogImageWidth;
-      const imgBeforeTurn = new Image();
-      imgBeforeTurn.src = lastRenderDataBeforeTurn.image.iconImage_.src_;
-      document.body.appendChild(imgBeforeTurn);
-      const lastRenderDataBeforeTurnClippedSrc = await getClippedImageNoAngle({
-        img: imgBeforeTurn,
+      lastRenderDataBeforeTurn.image = await clipToIcon({
+        imageStyle: lastRenderDataBeforeTurn.image,
+        clipper: getClippedImageNoAngle,
         clipInfo: {
           cutLength: lastRenderDataBeforeTurnCutLength,
           cutInFront: false,
         },
-        canvasWidth: ogImageWidth,
-        canvasHeight: ogImageHeight,
-      });
-      lastRenderDataBeforeTurn.image = createOlIconWithDataURL({
-        src: lastRenderDataBeforeTurnClippedSrc,
-        imgSize: [ogImageWidth, ogImageHeight],
-        scale: ogImage.getScale(),
+        canvasSize: [ogImageWidth, ogImageHeight],
         anchor: lastRenderDataBeforeTurn.image.anchor_,
       });
     }
@@ -912,7 +826,7 @@ async function handleHalfImageFirstAfterLeftTurn(options) {
     customRender,
     currentGeometryCoordIndex,
   } = options;
-  let clippedSrc;
+  let clippedImage;
 
   if (point.segmentLength === null || point.segmentLength === undefined) {
     const distanceToPreviousSpPointInGapSize = calculatePointsDistance(
@@ -921,51 +835,41 @@ async function handleHalfImageFirstAfterLeftTurn(options) {
     );
     const distanceToPreviousSpPointRatio = distanceToPreviousSpPointInGapSize / gapSize;
     const distanceToPreviousSpPoint = distanceToPreviousSpPointRatio * ogImageWidth;
-    const img = new Image();
-    img.src = ogImage.iconImage_.src_;
-    document.body.appendChild(img);
 
     if (distanceToPreviousSpPoint + 1e-11 < ogImageWidth) {
-      clippedSrc = await getClippedImageNoAngle({
-        img,
+      clippedImage = await clipToIcon({
+        imageStyle: ogImage,
+        clipper: getClippedImageNoAngle,
         clipInfo: {
           cutLength: distanceToPreviousSpPoint,
           cutInFront: true,
           cutOnBothEnds: false,
         },
-        canvasWidth: ogImageWidth,
-        canvasHeight: ogImageHeight,
+        canvasSize: [ogImageWidth, ogImageHeight],
+        anchor: [0.5, 0.5],
       });
     } else {
-      clippedSrc = await getClippedImageNoAngle({
-        img,
+      clippedImage = await clipToIcon({
+        imageStyle: ogImage,
+        clipper: getClippedImageNoAngle,
         clipInfo: {},
-        canvasWidth: ogImageWidth,
-        canvasHeight: ogImageHeight,
+        canvasSize: [ogImageWidth, ogImageHeight],
+        anchor: [0.5, 0.5],
       });
     }
   } else {
-    const img = new Image();
-    img.src = ogImage.iconImage_.src_;
-    document.body.appendChild(img);
-    clippedSrc = await getClippedImageNoAngle({
-      img,
+    clippedImage = await clipToIcon({
+      imageStyle: ogImage,
+      clipper: getClippedImageNoAngle,
       clipInfo: {
         cutLength: point.segmentLength,
         cutInFront: false,
         cutOnBothEnds: true,
       },
-      canvasWidth: ogImageWidth,
-      canvasHeight: ogImageHeight,
+      canvasSize: [ogImageWidth, ogImageHeight],
+      anchor: [0.5, 0.5],
     });
   }
-
-  const clippedImage = createOlIconWithDataURL({
-    src: clippedSrc,
-    imgSize: [ogImageWidth, ogImageHeight],
-    scale: ogImage.getScale(),
-    anchor: [0.5, 0.5],
-  });
 
   return [
     {
@@ -1306,45 +1210,6 @@ function renderPoint(options) {
   renderToUse.drawPoint(pointToDraw);
 }
 
-// Not quite a deep clone, but deep cloning the properties we need for rendering.
-// We do this to not affect all individually rendered images when adjusting some of them.
-async function deepCloneImage(image) {
-
-  return new Promise((res, _) => {
-    if (image.getImage().complete) {
-      const copy = image.clone();
-
-      copy.imgSize_ = structuredClone(image.imgSize_);
-      copy.iconImage_ = new image.iconImage_.__proto__.constructor(
-        image.iconImage_.image_,
-        image.iconImage_.src_,
-        [image.iconImage_.size_[0], image.iconImage_.size_[1]],
-        image.iconImage_.crossOrigin_,
-        image.iconImage_.imageState_,
-        image.iconImage_.color_,
-      );
-
-      res(copy);
-    } else {
-      image.getImage().onload = () => {
-        const copy = image.clone();
-
-        copy.imgSize_ = structuredClone(image.imgSize_);
-        copy.iconImage_ = new image.iconImage_.__proto__.constructor(
-          image.iconImage_.image_,
-          image.iconImage_.src_,
-          [image.iconImage_.size_[0], image.iconImage_.size_[1]],
-          image.iconImage_.crossOrigin_,
-          image.iconImage_.imageState_,
-          image.iconImage_.color_,
-        );
-
-        res(copy);
-      };
-    }
-  });
-}
-
 function getHashCode(object) {
   if (!USE_CACHING) {
     return 1;
@@ -1415,6 +1280,54 @@ function isCanvasEmpty(canvasSrc, canvasWidth, canvasHeight) {
 
   return canvasSrc === window._emptyCanvasCache.get(sizeKey);
 
+}
+
+function createDomImage(src) {
+  const img = new Image();
+  img.src = src;
+  document.body.appendChild(img);
+  return img;
+}
+
+async function clipToIcon(options) {
+  const {
+    imageStyle,
+    clipper,
+    clipInfo,
+    canvasSize,
+    anchor,
+    clipperOptions = {},
+  } = options;
+
+  const imgSize = getImageStyleSize(imageStyle);
+  const scale = imageStyle.getScale();
+  const [canvasWidth, canvasHeight] = canvasSize || imgSize;
+  const img = createDomImage(getImageStyleSrc(imageStyle));
+  const clippedSrc = await clipper({
+    img,
+    clipInfo,
+    canvasWidth,
+    canvasHeight,
+    ...clipperOptions,
+  });
+
+  return createOlIconWithDataURL({
+    src: clippedSrc,
+    imgSize,
+    scale,
+    anchor,
+  });
+}
+
+function getImageStyleSrc(imageStyle) {
+  return imageStyle.iconImage_?.src_ || imageStyle.getSrc?.();
+}
+
+function getImageStyleSize(imageStyle) {
+  return imageStyle.getSize?.()
+    || imageStyle.imgSize_
+    || imageStyle.size_
+    || imageStyle.iconImage_?.size_;
 }
 
 /**
