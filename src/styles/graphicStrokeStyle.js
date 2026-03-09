@@ -783,21 +783,34 @@ async function handleHalfImageLeftTurn(options) {
       && pointsDataToRender[pointsDataToRender.length - 2].geometryCoordIndex === firstHalfOfLeftTurnRenderData.geometryCoordIndex;
     if (hasRenderDataBeforeTurnOnSameSegment) {
       const lastRenderDataBeforeTurn = pointsDataToRender[pointsDataToRender.length - 2];
-      const lastRenderDataBeforeTurnCutRatio = calculatePointsDistance(
+      const incomingSpacing = calculatePointsDistance(
         lastRenderDataBeforeTurn.coords,
-        point.splitPointCoords,
-      ) / gapSize;
-      const lastRenderDataBeforeTurnCutLength = lastRenderDataBeforeTurnCutRatio * ogImageWidth;
-      lastRenderDataBeforeTurn.image = await clipToIcon({
-        imageStyle: lastRenderDataBeforeTurn.image,
-        clipper: getClippedImageNoAngle,
-        clipInfo: {
-          cutLength: lastRenderDataBeforeTurnCutLength,
-          cutInFront: false,
-        },
-        canvasSize: [ogImageWidth, ogImageHeight],
-        anchor: lastRenderDataBeforeTurn.image.anchor_,
-      });
+        firstHalfOfLeftTurnRenderData.coords,
+      );
+      const firstHalfOfLeftTurnVisibleLength = Number.isFinite(firstHalfOfLeftTurnRenderData.clippedAtLength)
+        ? Math.min(firstHalfOfLeftTurnRenderData.clippedAtLength, ogImageWidth)
+        : ogImageWidth;
+      const uncoveredFrontRatio = 1 - (firstHalfOfLeftTurnVisibleLength / ogImageWidth);
+      const incomingSpacingRatio = incomingSpacing / gapSize;
+      const shouldClipPreviousIncomingPoint = incomingSpacingRatio + 1e-11 < uncoveredFrontRatio;
+
+      if (shouldClipPreviousIncomingPoint) {
+        const lastRenderDataBeforeTurnCutRatio = calculatePointsDistance(
+          lastRenderDataBeforeTurn.coords,
+          point.splitPointCoords,
+        ) / gapSize;
+        const lastRenderDataBeforeTurnCutLength = lastRenderDataBeforeTurnCutRatio * ogImageWidth;
+        lastRenderDataBeforeTurn.image = await clipToIcon({
+          imageStyle: lastRenderDataBeforeTurn.image,
+          clipper: getClippedImageNoAngle,
+          clipInfo: {
+            cutLength: lastRenderDataBeforeTurnCutLength,
+            cutInFront: false,
+          },
+          canvasSize: [ogImageWidth, ogImageHeight],
+          anchor: lastRenderDataBeforeTurn.image.anchor_,
+        });
+      }
     }
   }
 
