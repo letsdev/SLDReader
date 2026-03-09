@@ -288,39 +288,22 @@ async function getNewPointsDataToRender(options) {
 
 async function getNewPointsDataToRenderForFullImg(options) {
   const {
-    point,
-    image,
-    renderCoords,
-    customRender,
-    currentGeometryCoordIndex,
     isRightTurn,
     isLeftTurn,
-    isRegularButShortened,
   } = options;
   let newPointsDataToRender;
 
   if (isRightTurn) {
-    newPointsDataToRender = await handleRightTurn(getTurnHandlerOptions(options, {
-      splitPoint: point,
-      onlyDoGap: false,
-      involvedGeometryCoords: getInvolvedGeometryCoords(options.pixelCoords, currentGeometryCoordIndex),
-    }));
+    newPointsDataToRender = await handleCurrentTurn(options, handleRightTurn);
   } else if (isLeftTurn) {
-    newPointsDataToRender = await handleLeftTurn(getTurnHandlerOptions(options, {
-      splitPoint: point,
-      onlyDoGap: false,
-      involvedGeometryCoords: getInvolvedGeometryCoords(options.pixelCoords, currentGeometryCoordIndex),
-    }));
-  } else if (isRegularButShortened) {
-    newPointsDataToRender = await handleRegularButShortened(getRegularButShortenedOptions(options));
+    newPointsDataToRender = await handleCurrentTurn(options, handleLeftTurn);
   } else {
-    newPointsDataToRender = [createUnchangedPointData(options)];
+    newPointsDataToRender = await getRegularOrUnchangedPointsData(options);
   }
 
-  const polygonClosingGapFillRenderData = await getPolygonClosingGapFillRenderDataForFullImg(options);
-  if (polygonClosingGapFillRenderData) {
-    newPointsDataToRender.push(...polygonClosingGapFillRenderData);
-  }
+  await appendPolygonClosingGapFillRenderData(options, newPointsDataToRender, {
+    supportsClosingLeftTurn: true,
+  });
 
   return newPointsDataToRender;
 }
@@ -333,39 +316,50 @@ async function getNewPointsDataToRenderForHalfImg(options) {
     isRightTurn,
     isLeftTurn,
     isFirstOfSegment,
-    isRegularButShortened,
   } = options;
-  const isFirstAfterLeftTurn = !isLeftTurn
+  const isHalfImageFirstAfterLeftTurn = !isLeftTurn
     && !isRightTurn
     && !isFirstOfSegment
     && i > 1
     && splitPoints[i - 1].isLeftTurn;
 
-  point.isFirstAfterLeftTurn = isFirstAfterLeftTurn;
+  point.isHalfImageFirstAfterLeftTurn = isHalfImageFirstAfterLeftTurn;
 
   let newPointsDataToRender;
   if (isRightTurn) {
-    newPointsDataToRender = await handleRightTurn(getTurnHandlerOptions(options, {
-      splitPoint: point,
-      onlyDoGap: false,
-      involvedGeometryCoords: getInvolvedGeometryCoords(options.pixelCoords, options.currentGeometryCoordIndex),
-    }));
+    newPointsDataToRender = await handleCurrentTurn(options, handleRightTurn);
   } else if (isLeftTurn) {
     newPointsDataToRender = await handleHalfImageLeftTurn(options);
-  } else if (isFirstAfterLeftTurn) {
-    newPointsDataToRender = await handleFirstAfterLeftTurn(options);
-  } else if (isRegularButShortened) {
-    newPointsDataToRender = await handleRegularButShortened(getRegularButShortenedOptions(options));
+  } else if (isHalfImageFirstAfterLeftTurn) {
+    newPointsDataToRender = await handleHalfImageFirstAfterLeftTurn(options);
   } else {
-    newPointsDataToRender = [createUnchangedPointData(options)];
+    newPointsDataToRender = await getRegularOrUnchangedPointsData(options);
   }
 
-  const polygonClosingGapFillRenderData = await getPolygonClosingGapFillRenderDataForHalfImg(options);
-  if (polygonClosingGapFillRenderData) {
-    newPointsDataToRender.push(...polygonClosingGapFillRenderData);
-  }
+  await appendPolygonClosingGapFillRenderData(options, newPointsDataToRender, {
+    supportsClosingLeftTurn: false,
+  });
 
   return newPointsDataToRender;
+}
+
+async function handleCurrentTurn(options, turnHandler) {
+  return turnHandler(getTurnHandlerOptions(options, {
+    splitPoint: options.point,
+    onlyDoGap: false,
+    involvedGeometryCoords: getInvolvedGeometryCoords(
+      options.pixelCoords,
+      options.currentGeometryCoordIndex,
+    ),
+  }));
+}
+
+async function getRegularOrUnchangedPointsData(options) {
+  if (options.isRegularButShortened) {
+    return handleRegularButShortened(getRegularButShortenedOptions(options));
+  }
+
+  return [createUnchangedPointData(options)];
 }
 
 function getTurnHandlerOptions(options, overrides = {}) {
@@ -459,9 +453,20 @@ function getPolygonClosingContext(options) {
   };
 }
 
-async function getPolygonClosingGapFillRenderDataForFullImg(options) {
+async function appendPolygonClosingGapFillRenderData(options, newPointsDataToRender, policy) {
+  const polygonClosingGapFillRenderData = await getPolygonClosingGapFillRenderData(options, policy);
+  if (polygonClosingGapFillRenderData) {
+    newPointsDataToRender.push(...polygonClosingGapFillRenderData);
+  }
+}
+
+async function getPolygonClosingGapFillRenderData(options, policy) {
   const polygonClosingContext = getPolygonClosingContext(options);
   if (!polygonClosingContext) {
+    return null;
+  }
+
+  if (!polygonClosingContext.endOfPolygonIsRightTurn && !policy.supportsClosingLeftTurn) {
     return null;
   }
 
@@ -469,20 +474,6 @@ async function getPolygonClosingGapFillRenderDataForFullImg(options) {
     ? handleRightTurn
     : handleLeftTurn;
   return turnHandler(getTurnHandlerOptions(options, {
-    currentGeometryCoordIndex: polygonClosingContext.firstSplitPoint.startingGeometryCoordIndex,
-    splitPoint: polygonClosingContext.firstSplitPoint,
-    onlyDoGap: true,
-    involvedGeometryCoords: polygonClosingContext.involvedGeometryCoords,
-  }));
-}
-
-async function getPolygonClosingGapFillRenderDataForHalfImg(options) {
-  const polygonClosingContext = getPolygonClosingContext(options);
-  if (!polygonClosingContext || !polygonClosingContext.endOfPolygonIsRightTurn) {
-    return null;
-  }
-
-  return handleRightTurn(getTurnHandlerOptions(options, {
     currentGeometryCoordIndex: polygonClosingContext.firstSplitPoint.startingGeometryCoordIndex,
     splitPoint: polygonClosingContext.firstSplitPoint,
     onlyDoGap: true,
@@ -907,7 +898,7 @@ async function handleHalfImageLeftTurn(options) {
   ];
 }
 
-async function handleFirstAfterLeftTurn(options) {
+async function handleHalfImageFirstAfterLeftTurn(options) {
   const {
     i,
     point,
