@@ -14,21 +14,8 @@ import { calculateGraphicSpacing, getInitialGapSize } from './styleUtils';
 import {
   splitLineString,
   getGapCloserPoints,
-  calculatePointsDistance,
-  angleInRadiansAtB,
-  getMirroredCoords,
   getIsRightTurn,
 } from './geometryCalcs';
-
-// Performance tracking
-let perfMetrics = {
-  renderStrokeMarks: 0,
-  handleRightTurn: 0,
-  handleLeftTurn: 0,
-  getClippedImageForRightTurn: 0,
-  getClippedImageForLeftTurn: 0,
-  getClippedImageNoAngle: 0,
-};
 
 // A flag to prevent multiple renderer patches.
 let rendererPatched = false;
@@ -97,7 +84,6 @@ async function renderStrokeMarks(
   geometryType,
   feature,
 ) {
-  const startTime = performance.now();
   if (!pixelCoords) {
     return;
   }
@@ -204,22 +190,14 @@ async function renderStrokeMarks(
     const isLeftTurn = !isFirstOfGeometry
       && isFirstOfSegment
       && !isRightTurn;
-    // First straight after full left turn, so the SECOND one on that segment
-    const isFirstAfterLeftTurn = !isLeftTurn
-      && !isRightTurn
-      && !isFirstOfSegment // First on segment IS the (second half) of the left turn
-      && i > 1
-      && splitPoints[i - 1].isLeftTurn;
     const isRegularButShortened = !isRightTurn
       && !isLeftTurn
-      && !isFirstAfterLeftTurn
       && point.segmentLength !== null && point.segmentLength !== undefined;
 
     point.isRightTurn = isRightTurn;
     point.isLeftTurn = isLeftTurn;
     point.isFirstOfSegment = isFirstOfSegment;
     point.isFirstOfGeometry = isFirstOfGeometry;
-    point.isFirstAfterLeftTurn = isFirstAfterLeftTurn;
     point.isRegularButShortened = isRegularButShortened;
 
     let newPointsDataToRender;
@@ -245,44 +223,27 @@ async function renderStrokeMarks(
       });
     }
     else if (isLeftTurn) {
-      const leftTurnResult = await handleLeftTurn({
-        i,
-        pixelCoords,
-        splitPoints,
-        point,
-        currentGeometryCoordIndex,
-        ogImageWidth,
-        ogImageHeight,
-        isFirstOfSegment,
-        ogImage,
-        renderContext,
-        pixelRatio,
-        pointsDataToRender,
+      newPointsDataToRender = await handleLeftTurn({
+        currentGeometryCoordIndex: currentGeometryCoordIndex,
+        pointsDataToRender: pointsDataToRender,
+        pImage: ogImage,
+        pImageWidth: ogImageWidth,
+        pImageHeight: ogImageHeight,
+        pRenderContext: renderContext,
+        pPixelRatio: pixelRatio,
+        ogImageWidth: ogImageWidth,
+        ogImageHeight: ogImageHeight,
+        splitPoint: point,
         gapSize,
-        image,
-        renderCoords,
-        customRender,
+        onlyDoGap: false,
+        involvedGeometryCoords: {
+          coordOnFirstLine: pixelCoords[currentGeometryCoordIndex - 1],
+          intersectCoord: pixelCoords[currentGeometryCoordIndex],
+          coordOnSecondLine: pixelCoords[currentGeometryCoordIndex + 1],
+        },
       });
-      customRender = leftTurnResult.customRender;
-      image = leftTurnResult.image;
-      renderCoords = leftTurnResult.renderCoords;
-      newPointsDataToRender = [leftTurnResult.newPointDataToRender];
-    } else if (isFirstAfterLeftTurn) {
-      newPointsDataToRender = await handleFirstAfterLeftTurn({
-        i,
-        point,
-        splitPoints,
-        gapSize,
-        ogImageWidth,
-        ogImageHeight,
-        ogImage,
-        pixelRatio,
-        image,
-        renderCoords,
-        customRender,
-        currentGeometryCoordIndex,
-      });
-    } else if (isRegularButShortened) {
+    }
+    else if (isRegularButShortened) {
       newPointsDataToRender = await handleRegularButShortened({
         point,
         gapSize,
@@ -295,7 +256,8 @@ async function renderStrokeMarks(
         customRender,
         currentGeometryCoordIndex,
       });
-    } else {
+    }
+    else {
       // Unchanged render
       newPointsDataToRender = [
         {
@@ -327,8 +289,27 @@ async function renderStrokeMarks(
               pixelCoords[lastSplitPoint.startingGeometryCoordIndex + 1], // Is the same as [0]
               pixelCoords[1],
             );
-            if (endOfPolygonIsRightTurn) {
-              const endOfPolygonGapFillRenderData = await handleRightTurn({
+            const endOfPolygonGapFillRenderData = endOfPolygonIsRightTurn
+              ? await handleRightTurn({
+                currentGeometryCoordIndex: firstSplitPoint.startingGeometryCoordIndex,
+                pointsDataToRender: pointsDataToRender,
+                pImage: ogImage,
+                pImageWidth: ogImageWidth,
+                pImageHeight: ogImageHeight,
+                pRenderContext: renderContext,
+                pPixelRatio: pixelRatio,
+                ogImageWidth: ogImageWidth,
+                ogImageHeight: ogImageHeight,
+                splitPoint: firstSplitPoint,
+                gapSize: gapSize,
+                onlyDoGap: true,
+                involvedGeometryCoords: {
+                  coordOnFirstLine: pixelCoords[lastSplitPoint.startingGeometryCoordIndex],
+                  intersectCoord: pixelCoords[0],
+                  coordOnSecondLine: pixelCoords[1],
+                },
+              })
+              : await handleLeftTurn({
                 currentGeometryCoordIndex: firstSplitPoint.startingGeometryCoordIndex,
                 pointsDataToRender: pointsDataToRender,
                 pImage: ogImage,
@@ -347,9 +328,8 @@ async function renderStrokeMarks(
                   coordOnSecondLine: pixelCoords[1],
                 },
               });
-              newPointsDataToRender.push(endOfPolygonGapFillRenderData[0]);
-              newPointsDataToRender.push(endOfPolygonGapFillRenderData[1]);
-            }
+            newPointsDataToRender.push(endOfPolygonGapFillRenderData[0]);
+            newPointsDataToRender.push(endOfPolygonGapFillRenderData[1]);
           }
         }
       }
@@ -376,21 +356,9 @@ async function renderStrokeMarks(
         feature,
       });
     });
-
-  perfMetrics.renderStrokeMarks += performance.now() - startTime;
-  // console.log(performance.now(), 'Performance metrics (ms):', perfMetrics);
-  perfMetrics = {
-    renderStrokeMarks: 0,
-    handleRightTurn: 0,
-    handleLeftTurn: 0,
-    getClippedImageForRightTurn: 0,
-    getClippedImageForLeftTurn: 0,
-    getClippedImageNoAngle: 0,
-  };
 }
 
 async function handleRightTurn(options) {
-  const startTime = performance.now();
   const currentGeometryCoordIndex = options.currentGeometryCoordIndex;
   const pImage = options.pImage;
   const pImageWidth = options.pImageWidth;
@@ -464,6 +432,7 @@ async function handleRightTurn(options) {
       isSecondOfRightTurn: !gapCloserPoint.isFirst,
       isClipped: true,
     });
+
   }
   // \1 - finished
 
@@ -526,107 +495,6 @@ async function handleRightTurn(options) {
   const result = [
     ...gapCloserRenderPoints,
     nextSegmentRenderPoint,
-  ];
-  perfMetrics.handleRightTurn += performance.now() - startTime;
-  return result;
-}
-
-async function handleFirstAfterLeftTurn(options) {
-  const i = options.i;
-  const point = options.point;
-  const splitPoints = options.splitPoints;
-  const gapSize = options.gapSize;
-  const ogImageWidth = options.ogImageWidth;
-  const ogImageHeight = options.ogImageHeight;
-  const ogImage = options.ogImage;
-  const pixelRatio = options.pixelRatio;
-  let image = options.image;
-  const renderCoords = options.renderCoords;
-  const customRender = options.customRender;
-  const currentGeometryCoordIndex = options.currentGeometryCoordIndex;
-
-  let clippedSrc;
-  if (point.segmentLength === null || point.segmentLength === undefined) {
-    const distanceToPreviousSpPointInGapSize = calculatePointsDistance(point.splitPointCoords, splitPoints[i - 1].splitPointCoords);
-    const distanceToPreviousSpPointRatio = distanceToPreviousSpPointInGapSize / gapSize;
-    const distanceToPreviousSpPoint = distanceToPreviousSpPointRatio * ogImageWidth;
-    if (distanceToPreviousSpPoint + 1e-11 < ogImageWidth) {
-      // const cutLength = ogImageWidth - distanceToPreviousSpPoint;
-      const cutLength = distanceToPreviousSpPoint;
-      //const clonedImage = await deepCloneImage(ogImage);
-      const img = new Image();
-      // img.src = clonedImage.getSrc();
-      img.src = ogImage.iconImage_.src_;
-      document.body.appendChild(img);
-      clippedSrc = await getClippedImageNoAngle({
-        img: img,
-        clipInfo: {
-          cutLength,
-          cutInFront: true,
-          cutOnBothEnds: false,
-        },
-        canvasWidth: ogImageWidth,
-        canvasHeight: ogImageHeight,
-      });
-    } else {
-      //const clonedImage = await deepCloneImage(ogImage);
-      const img = new Image();
-      // img.src = clonedImage.getSrc();
-      img.src = ogImage.iconImage_.src_;
-      document.body.appendChild(img);
-      clippedSrc = await getClippedImageNoAngle({
-        img: img,
-        clipInfo: {
-          // No info -> don't clip
-        },
-        canvasWidth: ogImageWidth,
-        canvasHeight: ogImageHeight,
-      });
-    }
-  } else {
-    const cutLength = point.segmentLength;
-    //const clonedImage = await deepCloneImage(ogImage);
-    const img = new Image();
-    // img.src = clonedImage.getSrc();
-    img.src = ogImage.iconImage_.src_;
-    document.body.appendChild(img);
-    clippedSrc = await getClippedImageNoAngle({
-      img: img,
-      clipInfo: {
-        cutLength,
-        cutInFront: false,
-        cutOnBothEnds: true,
-      },
-      canvasWidth: ogImageWidth,
-      canvasHeight: ogImageHeight,
-    });
-  }
-  const imageAnchor = [0.5, 0.5];
-  image = createOlIconWithDataURL({
-    src: clippedSrc,
-    imgSize: [ogImageWidth, ogImageHeight],
-    scale: ogImage.getScale(),
-    anchor: imageAnchor,
-  });
-  // image = new Icon({
-  //   src: clippedSrc,
-  //   imgSize: [ogImageWidth, ogImageHeight],
-  //   scale: ogImage.getScale(),
-  //   anchor: imageAnchor,
-  //   anchorXUnits: 'fraction',
-  //   anchorYUnits: 'fraction',
-  // });
-  // image.getImage(pixelRatio).src = clippedSrc;
-
-  const result = [
-    {
-      // ignore: true,
-      image: image,
-      angle: point.angle,
-      coords: renderCoords,
-      rendererToUse: customRender,
-      geometryCoordIndex: currentGeometryCoordIndex,
-    },
   ];
   return result;
 }
@@ -695,184 +563,147 @@ async function handleRegularButShortened(options) {
 }
 
 async function handleLeftTurn(options) {
-  const startTime = performance.now();
-  const pixelCoords = options.pixelCoords;
-  const point = options.point;
   const currentGeometryCoordIndex = options.currentGeometryCoordIndex;
+  const pImage = options.pImage;
+  const pImageWidth = options.pImageWidth;
+  const pImageHeight = options.pImageHeight;
+  const pRenderContext = options.pRenderContext;
   const ogImageWidth = options.ogImageWidth;
   const ogImageHeight = options.ogImageHeight;
-  const ogImage = options.ogImage;
-  const renderContext = options.renderContext;
-  const pixelRatio = options.pixelRatio;
-  const pointsDataToRender = options.pointsDataToRender;
+  const splitPoint = options.splitPoint;
   const gapSize = options.gapSize;
+  const onlyDoGap = options.onlyDoGap;
+  const involvedGeometryCoords = options.involvedGeometryCoords;
 
-  /* 1 - Second half of the left turn (current split point) */
-  // Prepare current split point image data (first on new geometry segment)
-  const mirroredCoords = getMirroredCoords(
-    pixelCoords[currentGeometryCoordIndex - 1],
-    pixelCoords[currentGeometryCoordIndex],
-    pixelCoords[currentGeometryCoordIndex + 1],
-    true,
-    ogImageHeight / 2,
-  );
-  const cutAngle = angleInRadiansAtB(
-    mirroredCoords.intersect,
-    pixelCoords[currentGeometryCoordIndex],
-    pixelCoords[currentGeometryCoordIndex + 1],
-  );
-  const cutLength = point.segmentLength || gapSize;
-  const clipInfo = {
-    isFirst: false, // This is the first on the new segment, so the *second* half of the corner
-    isRightTurn: false,
-    cutRatio: cutLength / gapSize,
-    cutHeight: 0.5 * ogImageHeight,
-    cutAngle: cutAngle,
-  };
-
-  //const clonedImage = await deepCloneImage(ogImage);
-  const img = new Image();
-  // img.src = clonedImage.getSrc();
-  img.src = ogImage.iconImage_.src_;
-  document.body.appendChild(img);
-  const clippedSrc = await getClippedImageForLeftTurn({
-    img: img,
-    clipInfo: clipInfo,
-    canvasWidth: ogImageWidth,
-    canvasHeight: ogImageHeight,
+  const gapCloserPointData = getGapCloserPoints({
+    coordOnFirstLine: involvedGeometryCoords.coordOnFirstLine,
+    intersectCoord: involvedGeometryCoords.intersectCoord,
+    coordOnSecondLine: involvedGeometryCoords.coordOnSecondLine,
+    mirrorOffset: ogImageHeight / 2, /* half because we anchor at 0.5 */
   });
+  const gapCloserPoints = [gapCloserPointData.forwardPoint, gapCloserPointData.backwardPoint];
 
-  const imageAnchor = [0.5, 0.5];
-  const image = createOlIconWithDataURL({
-    src: clippedSrc,
-    imgSize: [ogImageWidth, ogImageHeight],
-    scale: ogImage.getScale(),
-    anchor: imageAnchor,
-  });
-  // const image = new Icon({
-  //   src: clippedSrc,
-  //   imgSize: [ogImageWidth, ogImageHeight],
-  //   scale: ogImage.getScale(),
-  //   anchor: imageAnchor,
-  //   anchorXUnits: 'fraction',
-  //   anchorYUnits: 'fraction',
-  // });
-  // image.getImage(pixelRatio).src = clippedSrc;
-  const renderCoords = point.splitPointCoords;
-  /* /1 */
+  // 1 - Create gap-closing render points
+  const gapCloserRenderPoints = [];
+  for (let i = 0; i < 2; i++) {
+    const gapCloserPoint = gapCloserPoints[i];
 
-  /* 2 - First half of the left turn (adjust previous split point render data) */
-  // (We can only do this in retrospect because we track this by the first splitpoint on the *next* segment)
-  const firstHalfOfLeftTurnRenderData = pointsDataToRender[pointsDataToRender.length - 1];
+    //let gapCloserImage = await deepCloneImage(pImage);
 
-  const firstHalfOfLeftTurnCutRatio = firstHalfOfLeftTurnRenderData.clippedAtLength / ogImageWidth;
-  const adjustingClipInfo = {
-    isFirst: true,
-    isRightTurn: false,
-    cutRatio: firstHalfOfLeftTurnCutRatio,
-    cutHeight: 0.5 * ogImageHeight,
-    cutAngle: cutAngle, // CutAngle is the same as before, since we're doing "half corner" for both.
-  };
-  //const clonedLeftImage = await deepCloneImage(firstHalfOfLeftTurnRenderData.image);
-  const imgLeft = new Image();
-  // imgLeft.src = clonedLeftImage.getSrc();
-  imgLeft.src = firstHalfOfLeftTurnRenderData.image.iconImage_.src_;
-  document.body.appendChild(imgLeft);
-  const firstHalfOfLeftTurnClippedSrc = await getClippedImageForLeftTurn({
-    // We use the previous image as a base here because sometimes they are already clipped on the other side, which we don't want to lose.
-    img: imgLeft,
-    clipInfo: adjustingClipInfo,
-    canvasWidth: ogImageWidth,
-    canvasHeight: ogImageHeight,
-  });
-  const firstHalfOfLeftTurnImageAnchor = firstHalfOfLeftTurnRenderData.fromSplitPoint.isFirstOfGeometry
-    ? [0.5, 0.5]
-    : firstHalfOfLeftTurnRenderData.image.anchor_;
-  firstHalfOfLeftTurnRenderData.image = createOlIconWithDataURL({
-    src: firstHalfOfLeftTurnClippedSrc,
-    imgSize: [ogImageWidth, ogImageHeight],
-    scale: ogImage.getScale(),
-    anchor: firstHalfOfLeftTurnImageAnchor,
-  });
-  // firstHalfOfLeftTurnRenderData.image = new Icon({
-  //   src: firstHalfOfLeftTurnClippedSrc,
-  //   imgSize: [ogImageWidth, ogImageHeight],
-  //   scale: ogImage.getScale(),
-  //   anchor: firstHalfOfLeftTurnImageAnchor,
-  //   anchorXUnits: 'fraction',
-  //   anchorYUnits: 'fraction',
-  // });
-  // firstHalfOfLeftTurnRenderData.image.getImage(pixelRatio).src = firstHalfOfLeftTurnClippedSrc;
-  // firstHalfOfLeftTurnRenderData.ignore = true;
-  /* /2 */
+    // This happens when the angle is so narrow, that the length of the corner is larger than the image width.
+    // We cannot sensibly cut here, we'd have to add another point. Instead, we cut the second half in the beginning to match the first.
+    if (!gapCloserPoint.isFirst && gapCloserPoints[0].cutLength > pImageWidth) {
+      gapCloserPoint.cutInFront = gapCloserPoints[0].cutLength - pImageWidth;
+    }
 
-  /* 3
-    * We then also check the one BEFORE the first half of the left turn.
-    * -> The first half of the left turn is the last split point on the segment.
-    * The one before that, if rendered as the full graphic, might however also cause problems and be visible past the cut-off area,
-    * because the two last splitpoints on a segment are sometimes very close to each other.
-    * -> We therefore go back to that renderPoint and adjust it.
-    * */
-  const hasRenderDataBeforeTurnOnSameSegment = pointsDataToRender.length - 2 >= 0
-    && pointsDataToRender[pointsDataToRender.length - 2].geometryCoordIndex === firstHalfOfLeftTurnRenderData.geometryCoordIndex;
-  if (hasRenderDataBeforeTurnOnSameSegment) {
-    const lastRenderDataBeforeTurn = pointsDataToRender[pointsDataToRender.length - 2];
+    let gapCloserImage = new Image();
+    gapCloserImage.src = pImage.iconImage_.src_;
+    document.body.appendChild(gapCloserImage);
 
-    const lastRenderDataBeforeTurnCutRatio = calculatePointsDistance(lastRenderDataBeforeTurn.coords, point.splitPointCoords) / gapSize;
-    const lastRenderDataBeforeTurnCutLength = lastRenderDataBeforeTurnCutRatio * ogImageWidth;
-    //const clonedLastImage = await deepCloneImage(lastRenderDataBeforeTurn.image);
-    const img = new Image();
-    // img.src = clonedLastImage.getSrc();
-    img.src = lastRenderDataBeforeTurn.image.iconImage_.src_;
-    document.body.appendChild(img);
-    const lastRenderDataBeforeTurnClippedSrc = await getClippedImageNoAngle({
-      img: img,
-      clipInfo: {
-        cutLength: lastRenderDataBeforeTurnCutLength,
-        cutInFront: false,
-      },
+    const clippedSrc = await getClippedImageForLeftTurn({
+      img: gapCloserImage,
+      clipInfo: gapCloserPoint,
       canvasWidth: ogImageWidth,
       canvasHeight: ogImageHeight,
     });
-    lastRenderDataBeforeTurn.image = createOlIconWithDataURL({
-      src: lastRenderDataBeforeTurnClippedSrc,
-      imgSize: [ogImageWidth, ogImageHeight],
-      scale: ogImage.getScale(),
-      anchor: lastRenderDataBeforeTurn.image.anchor_,
+    const imageAnchor = gapCloserPoint.isFirst
+      ? [0, 0.5]
+      : [1, 0.5];
+    gapCloserImage = createOlIconWithDataURL({
+      src: clippedSrc,
+      imgSize: [pImageWidth, pImageHeight],
+      scale: pImage.getScale(),
+      anchor: imageAnchor,
     });
-    // lastRenderDataBeforeTurn.image = new Icon({
-    //   src: lastRenderDataBeforeTurnClippedSrc,
-    //   imgSize: [ogImageWidth, ogImageHeight],
-    //   scale: ogImage.getScale(),
-    //   anchor: lastRenderDataBeforeTurn.image.anchor_,
+    // gapCloserImage = new Icon({
+    //   src: clippedSrc,
+    //   imgSize: [pImageWidth, pImageHeight],
+    //   scale: pImage.getScale(),
+    //   anchor: imageAnchor,
     //   anchorXUnits: 'fraction',
     //   anchorYUnits: 'fraction',
     // });
-    // lastRenderDataBeforeTurn.image.getImage(pixelRatio).src = lastRenderDataBeforeTurnClippedSrc;
-    // lastRenderDataBeforeTurn.ignore = true;
+    // gapCloserImage.getImage(pPixelRatio).src = clippedSrc;
+
+    const gapCloserRenderer = toContext(pRenderContext);
+
+    gapCloserRenderPoints.push({
+      image: gapCloserImage,
+      angle: gapCloserPoint.angle,
+      coords: gapCloserPoint.intersectCoords,
+      rendererToUse: gapCloserRenderer,
+      isFirstOfLeftTurn: gapCloserPoint.isFirst,
+      isSecondOfLeftTurn: !gapCloserPoint.isFirst,
+      isClipped: true,
+    });
+
   }
-  /* /3 */
+  // \1 - finished
 
-  const customRender = toContext(renderContext);
+  if (onlyDoGap) {
+    return [
+      ...gapCloserRenderPoints,
+    ];
+  }
 
-  const result = {
-    customRender: customRender,
-    image: image,
-    renderCoords: renderCoords,
-    newPointDataToRender: {
-      image: image,
-      angle: point.angle,
-      coords: renderCoords,
-      rendererToUse: customRender,
-      geometryCoordIndex: currentGeometryCoordIndex,
-    },
+  // 2 - Now add the actual next segment, past the gap closers
+  const nextSegmentCutRatio = (splitPoint.segmentLength || gapSize) / gapSize;
+  const nextSegmentCutLength = nextSegmentCutRatio * ogImageWidth;
+  const nextSegmentClipInfo = {
+    cutLength: nextSegmentCutLength,
   };
-  perfMetrics.handleLeftTurn += performance.now() - startTime;
+  //const clonedImage = await deepCloneImage(pImage);
+  const img = new Image();
+  // img.src = clonedImage.getSrc();
+  img.src = pImage.iconImage_.src_;
+  document.body.appendChild(img);
+
+  const nextSegmentClippedSrc = await getClippedImageNoAngle({
+    img: img,
+    clipInfo: nextSegmentClipInfo,
+    canvasWidth: ogImageWidth,
+    canvasHeight: ogImageHeight,
+  });
+  const nextSegmentImageAnchor = [0, 0.5];
+  const nextSegmentImage = createOlIconWithDataURL({
+    src: nextSegmentClippedSrc,
+    imgSize: [pImageWidth, pImageHeight],
+    scale: pImage.getScale(),
+    anchor: nextSegmentImageAnchor,
+  });
+  // const nextSegmentImage = new Icon({
+  //   src: nextSegmentClippedSrc,
+  //   imgSize: [pImageWidth, pImageHeight],
+  //   scale: pImage.getScale(),
+  //   anchor: nextSegmentImageAnchor,
+  //   anchorXUnits: 'fraction',
+  //   anchorYUnits: 'fraction',
+  // });
+  // nextSegmentImage.getImage(pPixelRatio).src = nextSegmentClippedSrc;
+
+  const nextSegmentRenderer = toContext(pRenderContext);
+
+  const nextSegmentRenderPoint = {
+    // ignore: true,
+    image: nextSegmentImage,
+    angle: gapCloserPointData.backwardPoint.angle,
+    coords: gapCloserPointData.backwardPoint.intersectCoords,
+    rendererToUse: nextSegmentRenderer,
+    geometryCoordIndex: currentGeometryCoordIndex,
+    isFirstAfterLeftTurn: true,
+    isClipped: nextSegmentCutRatio < 1,
+    clippedAtLength: nextSegmentCutLength,
+  };
+  // \2 - finished
+
+  const result = [
+    ...gapCloserRenderPoints,
+    nextSegmentRenderPoint,
+  ];
   return result;
 }
 
 function getClippedImageForRightTurn(options) {
-  const startTime = performance.now();
   const img = options.img;
   const clipInfo = options.clipInfo;
   const canvasWidth = options.canvasWidth;
@@ -899,7 +730,6 @@ function getClippedImageForRightTurn(options) {
       img: img.src,
     });
     if (USE_CACHING && clipInfoHashToBase64.rightTurn.has(clipInfoHashCode)) {
-      perfMetrics.getClippedImageForRightTurn += performance.now() - startTime;
       return res(clipInfoHashToBase64.rightTurn.get(clipInfoHashCode).base64);
     }
 
@@ -938,8 +768,6 @@ function getClippedImageForRightTurn(options) {
           clipInfo: clipInfo,
         });
       }
-
-      perfMetrics.getClippedImageForRightTurn += performance.now() - startTime;
       res(result);
     } else {
       img.onload = () => {
@@ -954,8 +782,6 @@ function getClippedImageForRightTurn(options) {
             clipInfo: clipInfo,
           });
         }
-
-        perfMetrics.getClippedImageForRightTurn += performance.now() - startTime;
         res(result);
       };
     }
@@ -963,79 +789,57 @@ function getClippedImageForRightTurn(options) {
 }
 
 function getClippedImageForLeftTurn(options) {
-  const startTime = performance.now();
-  const {
-    img,
-    clipInfo,
-    canvasWidth,
-    canvasHeight,
-  } = options;
+  const img = options.img;
+  const clipInfo = options.clipInfo;
+  const canvasWidth = options.canvasWidth;
+  const canvasHeight = options.canvasHeight;
 
   return new Promise((res, _) => {
     const canvas = document.createElement('canvas');
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
     const ctx = canvas.getContext('2d');
-    const canvasDiagonal = Math.sqrt(canvas.width ** 2 + canvas.height ** 2); // This is the max distance within the canvas
-
-  const cutLength = clipInfo.cutRatio
-    ? clipInfo.cutRatio * canvas.width
-    : undefined;
+    const cutLength = clipInfo.cutLength;
+    const canvasDiagonal = Math.sqrt(
+      (canvasWidth > cutLength
+        ? canvas.width ** 2
+        : cutLength ** 2) + canvas.height ** 2,
+    ); // This is the max distance within the canvas
 
     const clipInfoHashCode = getHashCode({
+      angle: clipInfo.angle,
       cutAngle: clipInfo.cutAngle,
-      cutLength: cutLength,
-      canvasDiagonal: canvasDiagonal,
+      cutLength: clipInfo.cutLength,
+      canvasDiagonal: clipInfo.canvasDiagonal,
       isFirst: clipInfo.isFirst,
       img: img.src,
     });
     if (USE_CACHING && clipInfoHashToBase64.leftTurn.has(clipInfoHashCode)) {
-      perfMetrics.getClippedImageForLeftTurn += performance.now() - startTime;
       return res(clipInfoHashToBase64.leftTurn.get(clipInfoHashCode).base64);
     }
 
-  ctx.save();
-  ctx.beginPath();
-
-  if (clipInfo.isFirst) {
-    const width = cutLength && cutLength < canvas.width
-      ? cutLength
-      : canvas.width;
-    const leftEdge = 0;
-    const rightEdge = width;
-
-    ctx.moveTo(leftEdge, 0);
-    ctx.lineTo(leftEdge, clipInfo.cutHeight);
-    ctx.lineTo(rightEdge, clipInfo.cutHeight);
-    const invertedCutAngle = Math.PI + clipInfo.cutAngle;
-    const angledX = rightEdge - Math.cos(invertedCutAngle) * canvasDiagonal;
-    const angledY = clipInfo.cutHeight + Math.sin(invertedCutAngle) * canvasDiagonal;
-    ctx.lineTo(angledX, angledY);
-    ctx.closePath();
-    ctx.clip();
-
+    ctx.save();
     ctx.beginPath();
-    ctx.rect(leftEdge, 0, rightEdge, canvas.height);
-    ctx.clip();
-  } else {
-    const width = cutLength || canvas.width;
-    const leftEdge = 0.5 * canvas.width - 0.5 * width;
-    const rightEdge = 0.5 * canvas.width + 0.5 * width;
 
-    ctx.moveTo(leftEdge, clipInfo.cutHeight);
-    ctx.lineTo(rightEdge, clipInfo.cutHeight);
-    ctx.lineTo(rightEdge, 0);
-    const invertedCutAngle = Math.PI + clipInfo.cutAngle;
-    const angledX = leftEdge + Math.cos(invertedCutAngle) * canvasDiagonal;
-    const angledY = clipInfo.cutHeight + Math.sin(invertedCutAngle) * canvasDiagonal;
-    ctx.lineTo(angledX, angledY);
-    ctx.closePath();
-    ctx.clip();
-
-    ctx.beginPath();
-    ctx.rect(0, 0, rightEdge, canvas.height);
-    ctx.clip();
-  }
+    if (clipInfo.isFirst) {
+      ctx.moveTo(0, canvasHeight);
+      ctx.lineTo(cutLength, canvasHeight);
+      const angledX = cutLength + Math.cos(Math.PI - clipInfo.cutAngle) * canvasDiagonal;
+      const angledY = canvasHeight - Math.sin(clipInfo.cutAngle) * canvasDiagonal;
+      ctx.lineTo(angledX, angledY);
+      ctx.lineTo(0, 0);
+      ctx.closePath();
+      ctx.clip();
+    } else {
+      ctx.moveTo(canvasWidth, canvasHeight);
+      ctx.lineTo(canvasWidth - cutLength, canvasHeight);
+      const angledX = canvasWidth - cutLength + Math.cos(clipInfo.cutAngle) * canvasDiagonal;
+      const angledY = canvasHeight - Math.sin(clipInfo.cutAngle) * canvasDiagonal;
+      ctx.lineTo(angledX, angledY);
+      ctx.lineTo(canvasWidth, 0);
+      ctx.closePath();
+      ctx.clip();
+    }
 
     if (img.complete) {
       ctx.drawImage(img, 0, 0);
@@ -1049,8 +853,6 @@ function getClippedImageForLeftTurn(options) {
           clipInfo: clipInfo,
         });
       }
-
-      perfMetrics.getClippedImageForLeftTurn += performance.now() - startTime;
 
       res(result);
     } else {
@@ -1067,8 +869,6 @@ function getClippedImageForLeftTurn(options) {
           });
         }
 
-        perfMetrics.getClippedImageForLeftTurn += performance.now() - startTime;
-
         res(result);
       };
     }
@@ -1076,7 +876,6 @@ function getClippedImageForLeftTurn(options) {
 }
 
 function getClippedImageNoAngle(options) {
-  const startTime = performance.now();
   const img = options.img;
   const clipInfo = options.clipInfo;
   const canvasWidth = options.canvasWidth;
@@ -1104,7 +903,6 @@ function getClippedImageNoAngle(options) {
       img: img.src,
     });
     if (USE_CACHING && clipInfoHashToBase64.straight.has(clipInfoHashCode)) {
-      perfMetrics.getClippedImageNoAngle += performance.now() - startTime;
       return res(clipInfoHashToBase64.straight.get(clipInfoHashCode).base64);
     }
 
@@ -1133,8 +931,6 @@ function getClippedImageNoAngle(options) {
         });
       }
 
-      perfMetrics.getClippedImageNoAngle += performance.now() - startTime;
-
       res(result);
     } else {
       img.onload = () => {
@@ -1149,8 +945,6 @@ function getClippedImageNoAngle(options) {
             clipInfo: clipInfo,
           });
         }
-
-        perfMetrics.getClippedImageNoAngle += performance.now() - startTime;
 
         res(result);
       };
@@ -1343,7 +1137,7 @@ function createOlIconWithDataURL(options) {
 
   const icon = new Icon({
     img: tempImg,
-    imgSize: imgSize,    
+    imgSize: imgSize,
     size: imgSize, // OL10 needs size when img is provided
     scale: scale,
     anchor: anchor,
