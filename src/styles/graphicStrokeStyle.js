@@ -268,138 +268,33 @@ async function renderStrokeMarks(
       renderCoords = leftTurnResult.renderCoords;
       newPointsDataToRender = [leftTurnResult.newPointDataToRender];
     } else if (isFirstAfterLeftTurn) {
-      let clippedSrc;
-      if (point.segmentLength === null || point.segmentLength === undefined) {
-        const distanceToPreviousSpPointInGapSize = calculatePointsDistance(point.splitPointCoords, splitPoints[i - 1].splitPointCoords);
-        const distanceToPreviousSpPointRatio = distanceToPreviousSpPointInGapSize / gapSize;
-        const distanceToPreviousSpPoint = distanceToPreviousSpPointRatio * ogImageWidth;
-        if (distanceToPreviousSpPoint + 1e-11 < ogImageWidth) {
-          // const cutLength = ogImageWidth - distanceToPreviousSpPoint;
-          const cutLength = distanceToPreviousSpPoint;
-          //const clonedImage = await deepCloneImage(ogImage);
-          const img = new Image();
-          // img.src = clonedImage.getSrc();
-          img.src = ogImage.iconImage_.src_;
-          document.body.appendChild(img);
-          clippedSrc = await getClippedImageNoAngle({
-            img: img,
-            clipInfo: {
-              cutLength,
-              cutInFront: true,
-              cutOnBothEnds: false,
-            },
-            canvasWidth: ogImageWidth,
-            canvasHeight: ogImageHeight,
-          });
-        } else {
-          //const clonedImage = await deepCloneImage(ogImage);
-          const img = new Image();
-          // img.src = clonedImage.getSrc();
-          img.src = ogImage.iconImage_.src_;
-          document.body.appendChild(img);
-          clippedSrc = await getClippedImageNoAngle({
-            img: img,
-            clipInfo: {
-              // No info -> don't clip
-            },
-            canvasWidth: ogImageWidth,
-            canvasHeight: ogImageHeight,
-          });
-        }
-      } else {
-        const cutLength = point.segmentLength;
-        //const clonedImage = await deepCloneImage(ogImage);
-        const img = new Image();
-        // img.src = clonedImage.getSrc();
-        img.src = ogImage.iconImage_.src_;
-        document.body.appendChild(img);
-        clippedSrc = await getClippedImageNoAngle({
-          img: img,
-          clipInfo: {
-            cutLength,
-            cutInFront: false,
-            cutOnBothEnds: true,
-          },
-          canvasWidth: ogImageWidth,
-          canvasHeight: ogImageHeight,
-        });
-      }
-      const imageAnchor = [0.5, 0.5];
-      image = createOlIconWithDataURL({
-        src: clippedSrc,
-        imgSize: [ogImageWidth, ogImageHeight],
-        scale: ogImage.getScale(),
-        anchor: imageAnchor,
+      newPointsDataToRender = await handleFirstAfterLeftTurn({
+        i,
+        point,
+        splitPoints,
+        gapSize,
+        ogImageWidth,
+        ogImageHeight,
+        ogImage,
+        pixelRatio,
+        image,
+        renderCoords,
+        customRender,
+        currentGeometryCoordIndex,
       });
-      // image = new Icon({
-      //   src: clippedSrc,
-      //   imgSize: [ogImageWidth, ogImageHeight],
-      //   scale: ogImage.getScale(),
-      //   anchor: imageAnchor,
-      //   anchorXUnits: 'fraction',
-      //   anchorYUnits: 'fraction',
-      // });
-      // image.getImage(pixelRatio).src = clippedSrc;
-
-      newPointsDataToRender = [
-        {
-          // ignore: true,
-          image: image,
-          angle: point.angle,
-          coords: renderCoords,
-          rendererToUse: customRender,
-          geometryCoordIndex: currentGeometryCoordIndex,
-        },
-      ];
     } else if (isRegularButShortened) {
-      //image = await deepCloneImage(ogImage);
-      const img = new Image();
-      // img.src = image.getSrc();
-      img.src = ogImage.iconImage_.src_;
-      document.body.appendChild(img);
-      const cutRatio = point.segmentLength / gapSize;
-      const cutLength = cutRatio * ogImageWidth;
-      const clippedSrc = await getClippedImageNoAngle({
-        img: img,
-        clipInfo: {
-          cutLength: point.isFirstOfGeometry
-            ? ogImageWidth - cutLength
-            : cutLength,
-          cutInFront: false,
-          cutOnBothEnds: point.isFirstOfGeometry,
-        },
-        canvasWidth: ogImageWidth,
-        canvasHeight: ogImageHeight,
+      newPointsDataToRender = await handleRegularButShortened({
+        point,
+        gapSize,
+        ogImageWidth,
+        ogImageHeight,
+        ogImage,
+        pixelRatio,
+        image,
+        renderCoords,
+        customRender,
+        currentGeometryCoordIndex,
       });
-      const imageAnchor = point.isFirstOfGeometry
-        ? [0.5, 0.5]
-        : [0, 0.5];
-      image = createOlIconWithDataURL({
-        src: clippedSrc,
-        imgSize: [ogImageWidth, ogImageHeight],
-        scale: ogImage.getScale(),
-        anchor: imageAnchor,
-      });
-      // image = new Icon({
-      //   src: clippedSrc,
-      //   imgSize: [ogImageWidth, ogImageHeight],
-      //   scale: ogImage.getScale(),
-      //   anchor: imageAnchor,
-      //   anchorXUnits: 'fraction',
-      //   anchorYUnits: 'fraction',
-      // });
-      // image.getImage(pixelRatio).src = clippedSrc;
-
-      newPointsDataToRender = [
-        {
-          // ignore: true,
-          image: image,
-          angle: point.angle,
-          coords: renderCoords,
-          rendererToUse: customRender,
-          geometryCoordIndex: currentGeometryCoordIndex,
-        },
-      ];
     } else {
       // Unchanged render
       newPointsDataToRender = [
@@ -633,6 +528,169 @@ async function handleRightTurn(options) {
     nextSegmentRenderPoint,
   ];
   perfMetrics.handleRightTurn += performance.now() - startTime;
+  return result;
+}
+
+async function handleFirstAfterLeftTurn(options) {
+  const i = options.i;
+  const point = options.point;
+  const splitPoints = options.splitPoints;
+  const gapSize = options.gapSize;
+  const ogImageWidth = options.ogImageWidth;
+  const ogImageHeight = options.ogImageHeight;
+  const ogImage = options.ogImage;
+  const pixelRatio = options.pixelRatio;
+  let image = options.image;
+  const renderCoords = options.renderCoords;
+  const customRender = options.customRender;
+  const currentGeometryCoordIndex = options.currentGeometryCoordIndex;
+
+  let clippedSrc;
+  if (point.segmentLength === null || point.segmentLength === undefined) {
+    const distanceToPreviousSpPointInGapSize = calculatePointsDistance(point.splitPointCoords, splitPoints[i - 1].splitPointCoords);
+    const distanceToPreviousSpPointRatio = distanceToPreviousSpPointInGapSize / gapSize;
+    const distanceToPreviousSpPoint = distanceToPreviousSpPointRatio * ogImageWidth;
+    if (distanceToPreviousSpPoint + 1e-11 < ogImageWidth) {
+      // const cutLength = ogImageWidth - distanceToPreviousSpPoint;
+      const cutLength = distanceToPreviousSpPoint;
+      //const clonedImage = await deepCloneImage(ogImage);
+      const img = new Image();
+      // img.src = clonedImage.getSrc();
+      img.src = ogImage.iconImage_.src_;
+      document.body.appendChild(img);
+      clippedSrc = await getClippedImageNoAngle({
+        img: img,
+        clipInfo: {
+          cutLength,
+          cutInFront: true,
+          cutOnBothEnds: false,
+        },
+        canvasWidth: ogImageWidth,
+        canvasHeight: ogImageHeight,
+      });
+    } else {
+      //const clonedImage = await deepCloneImage(ogImage);
+      const img = new Image();
+      // img.src = clonedImage.getSrc();
+      img.src = ogImage.iconImage_.src_;
+      document.body.appendChild(img);
+      clippedSrc = await getClippedImageNoAngle({
+        img: img,
+        clipInfo: {
+          // No info -> don't clip
+        },
+        canvasWidth: ogImageWidth,
+        canvasHeight: ogImageHeight,
+      });
+    }
+  } else {
+    const cutLength = point.segmentLength;
+    //const clonedImage = await deepCloneImage(ogImage);
+    const img = new Image();
+    // img.src = clonedImage.getSrc();
+    img.src = ogImage.iconImage_.src_;
+    document.body.appendChild(img);
+    clippedSrc = await getClippedImageNoAngle({
+      img: img,
+      clipInfo: {
+        cutLength,
+        cutInFront: false,
+        cutOnBothEnds: true,
+      },
+      canvasWidth: ogImageWidth,
+      canvasHeight: ogImageHeight,
+    });
+  }
+  const imageAnchor = [0.5, 0.5];
+  image = createOlIconWithDataURL({
+    src: clippedSrc,
+    imgSize: [ogImageWidth, ogImageHeight],
+    scale: ogImage.getScale(),
+    anchor: imageAnchor,
+  });
+  // image = new Icon({
+  //   src: clippedSrc,
+  //   imgSize: [ogImageWidth, ogImageHeight],
+  //   scale: ogImage.getScale(),
+  //   anchor: imageAnchor,
+  //   anchorXUnits: 'fraction',
+  //   anchorYUnits: 'fraction',
+  // });
+  // image.getImage(pixelRatio).src = clippedSrc;
+
+  const result = [
+    {
+      // ignore: true,
+      image: image,
+      angle: point.angle,
+      coords: renderCoords,
+      rendererToUse: customRender,
+      geometryCoordIndex: currentGeometryCoordIndex,
+    },
+  ];
+  return result;
+}
+
+async function handleRegularButShortened(options) {
+  const point = options.point;
+  const gapSize = options.gapSize;
+  const ogImageWidth = options.ogImageWidth;
+  const ogImageHeight = options.ogImageHeight;
+  const ogImage = options.ogImage;
+  const pixelRatio = options.pixelRatio;
+  let image = options.image;
+  const renderCoords = options.renderCoords;
+  const customRender = options.customRender;
+  const currentGeometryCoordIndex = options.currentGeometryCoordIndex;
+
+  //image = await deepCloneImage(ogImage);
+  const img = new Image();
+  // img.src = image.getSrc();
+  img.src = ogImage.iconImage_.src_;
+  document.body.appendChild(img);
+  const cutRatio = point.segmentLength / gapSize;
+  const cutLength = cutRatio * ogImageWidth;
+  const clippedSrc = await getClippedImageNoAngle({
+    img: img,
+    clipInfo: {
+      cutLength: point.isFirstOfGeometry
+        ? ogImageWidth - cutLength
+        : cutLength,
+      cutInFront: false,
+      cutOnBothEnds: point.isFirstOfGeometry,
+    },
+    canvasWidth: ogImageWidth,
+    canvasHeight: ogImageHeight,
+  });
+  const imageAnchor = point.isFirstOfGeometry
+    ? [0.5, 0.5]
+    : [0, 0.5];
+  image = createOlIconWithDataURL({
+    src: clippedSrc,
+    imgSize: [ogImageWidth, ogImageHeight],
+    scale: ogImage.getScale(),
+    anchor: imageAnchor,
+  });
+  // image = new Icon({
+  //   src: clippedSrc,
+  //   imgSize: [ogImageWidth, ogImageHeight],
+  //   scale: ogImage.getScale(),
+  //   anchor: imageAnchor,
+  //   anchorXUnits: 'fraction',
+  //   anchorYUnits: 'fraction',
+  // });
+  // image.getImage(pixelRatio).src = clippedSrc;
+
+  const result = [
+    {
+      // ignore: true,
+      image: image,
+      angle: point.angle,
+      coords: renderCoords,
+      rendererToUse: customRender,
+      geometryCoordIndex: currentGeometryCoordIndex,
+    },
+  ];
   return result;
 }
 
