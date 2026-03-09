@@ -35,6 +35,27 @@ const clipInfoHashToBase64 = {
 };
 const USE_CACHING = true;
 
+const TURN_DIRECTION_CONFIG = {
+  right: {
+    clipCacheKey: 'rightTurn',
+    firstGapFlag: 'isFirstOfRightTurn',
+    secondGapFlag: 'isSecondOfRightTurn',
+    nextSegmentFlag: 'isFirstAfterRightTurn',
+    getEdgeY: () => 0,
+    getOppositeY: canvasHeight => canvasHeight,
+    angledYDirection: 1,
+  },
+  left: {
+    clipCacheKey: 'leftTurn',
+    firstGapFlag: 'isFirstOfLeftTurn',
+    secondGapFlag: 'isSecondOfLeftTurn',
+    nextSegmentFlag: 'isFirstAfterLeftTurn',
+    getEdgeY: canvasHeight => canvasHeight,
+    getOppositeY: () => 0,
+    angledYDirection: -1,
+  },
+};
+
 // Used to quickly check if canvasses are empty
 let emptyCanvasSrc = null;
 
@@ -358,7 +379,24 @@ async function renderStrokeMarks(
     });
 }
 
+function getTurnDirectionConfig(turnDirection) {
+  const turnDirectionConfig = TURN_DIRECTION_CONFIG[turnDirection];
+
+  if (!turnDirectionConfig) {
+    throw new Error(`Unsupported turn direction: ${turnDirection}`);
+  }
+
+  return turnDirectionConfig;
+}
+
 async function handleRightTurn(options) {
+  return handleTurn({
+    ...options,
+    turnDirection: 'right',
+  });
+}
+
+async function handleTurn(options) {
   const currentGeometryCoordIndex = options.currentGeometryCoordIndex;
   const pImage = options.pImage;
   const pImageWidth = options.pImageWidth;
@@ -370,6 +408,8 @@ async function handleRightTurn(options) {
   const gapSize = options.gapSize;
   const onlyDoGap = options.onlyDoGap;
   const involvedGeometryCoords = options.involvedGeometryCoords;
+  const turnDirection = options.turnDirection;
+  const turnDirectionConfig = getTurnDirectionConfig(turnDirection);
 
   const gapCloserPointData = getGapCloserPoints({
     coordOnFirstLine: involvedGeometryCoords.coordOnFirstLine,
@@ -396,11 +436,12 @@ async function handleRightTurn(options) {
     gapCloserImage.src = pImage.iconImage_.src_;
     document.body.appendChild(gapCloserImage);
 
-    const clippedSrc = await getClippedImageForRightTurn({
+    const clippedSrc = await getClippedImageForTurn({
       img: gapCloserImage,
       clipInfo: gapCloserPoint,
       canvasWidth: ogImageWidth,
       canvasHeight: ogImageHeight,
+      turnDirection,
     });
     const imageAnchor = gapCloserPoint.isFirst
       ? [0, 0.5]
@@ -428,11 +469,10 @@ async function handleRightTurn(options) {
       angle: gapCloserPoint.angle,
       coords: gapCloserPoint.intersectCoords,
       rendererToUse: gapCloserRenderer,
-      isFirstOfRightTurn: gapCloserPoint.isFirst,
-      isSecondOfRightTurn: !gapCloserPoint.isFirst,
+      [turnDirectionConfig.firstGapFlag]: gapCloserPoint.isFirst,
+      [turnDirectionConfig.secondGapFlag]: !gapCloserPoint.isFirst,
       isClipped: true,
     });
-
   }
   // \1 - finished
 
@@ -486,7 +526,7 @@ async function handleRightTurn(options) {
     coords: gapCloserPointData.backwardPoint.intersectCoords,
     rendererToUse: nextSegmentRenderer,
     geometryCoordIndex: currentGeometryCoordIndex,
-    isFirstAfterRightTurn: true,
+    [turnDirectionConfig.nextSegmentFlag]: true,
     isClipped: nextSegmentCutRatio < 1,
     clippedAtLength: nextSegmentCutLength,
   };
@@ -563,151 +603,19 @@ async function handleRegularButShortened(options) {
 }
 
 async function handleLeftTurn(options) {
-  const currentGeometryCoordIndex = options.currentGeometryCoordIndex;
-  const pImage = options.pImage;
-  const pImageWidth = options.pImageWidth;
-  const pImageHeight = options.pImageHeight;
-  const pRenderContext = options.pRenderContext;
-  const ogImageWidth = options.ogImageWidth;
-  const ogImageHeight = options.ogImageHeight;
-  const splitPoint = options.splitPoint;
-  const gapSize = options.gapSize;
-  const onlyDoGap = options.onlyDoGap;
-  const involvedGeometryCoords = options.involvedGeometryCoords;
-
-  const gapCloserPointData = getGapCloserPoints({
-    coordOnFirstLine: involvedGeometryCoords.coordOnFirstLine,
-    intersectCoord: involvedGeometryCoords.intersectCoord,
-    coordOnSecondLine: involvedGeometryCoords.coordOnSecondLine,
-    mirrorOffset: ogImageHeight / 2, /* half because we anchor at 0.5 */
+  return handleTurn({
+    ...options,
+    turnDirection: 'left',
   });
-  const gapCloserPoints = [gapCloserPointData.forwardPoint, gapCloserPointData.backwardPoint];
-
-  // 1 - Create gap-closing render points
-  const gapCloserRenderPoints = [];
-  for (let i = 0; i < 2; i++) {
-    const gapCloserPoint = gapCloserPoints[i];
-
-    //let gapCloserImage = await deepCloneImage(pImage);
-
-    // This happens when the angle is so narrow, that the length of the corner is larger than the image width.
-    // We cannot sensibly cut here, we'd have to add another point. Instead, we cut the second half in the beginning to match the first.
-    if (!gapCloserPoint.isFirst && gapCloserPoints[0].cutLength > pImageWidth) {
-      gapCloserPoint.cutInFront = gapCloserPoints[0].cutLength - pImageWidth;
-    }
-
-    let gapCloserImage = new Image();
-    gapCloserImage.src = pImage.iconImage_.src_;
-    document.body.appendChild(gapCloserImage);
-
-    const clippedSrc = await getClippedImageForLeftTurn({
-      img: gapCloserImage,
-      clipInfo: gapCloserPoint,
-      canvasWidth: ogImageWidth,
-      canvasHeight: ogImageHeight,
-    });
-    const imageAnchor = gapCloserPoint.isFirst
-      ? [0, 0.5]
-      : [1, 0.5];
-    gapCloserImage = createOlIconWithDataURL({
-      src: clippedSrc,
-      imgSize: [pImageWidth, pImageHeight],
-      scale: pImage.getScale(),
-      anchor: imageAnchor,
-    });
-    // gapCloserImage = new Icon({
-    //   src: clippedSrc,
-    //   imgSize: [pImageWidth, pImageHeight],
-    //   scale: pImage.getScale(),
-    //   anchor: imageAnchor,
-    //   anchorXUnits: 'fraction',
-    //   anchorYUnits: 'fraction',
-    // });
-    // gapCloserImage.getImage(pPixelRatio).src = clippedSrc;
-
-    const gapCloserRenderer = toContext(pRenderContext);
-
-    gapCloserRenderPoints.push({
-      image: gapCloserImage,
-      angle: gapCloserPoint.angle,
-      coords: gapCloserPoint.intersectCoords,
-      rendererToUse: gapCloserRenderer,
-      isFirstOfLeftTurn: gapCloserPoint.isFirst,
-      isSecondOfLeftTurn: !gapCloserPoint.isFirst,
-      isClipped: true,
-    });
-
-  }
-  // \1 - finished
-
-  if (onlyDoGap) {
-    return [
-      ...gapCloserRenderPoints,
-    ];
-  }
-
-  // 2 - Now add the actual next segment, past the gap closers
-  const nextSegmentCutRatio = (splitPoint.segmentLength || gapSize) / gapSize;
-  const nextSegmentCutLength = nextSegmentCutRatio * ogImageWidth;
-  const nextSegmentClipInfo = {
-    cutLength: nextSegmentCutLength,
-  };
-  //const clonedImage = await deepCloneImage(pImage);
-  const img = new Image();
-  // img.src = clonedImage.getSrc();
-  img.src = pImage.iconImage_.src_;
-  document.body.appendChild(img);
-
-  const nextSegmentClippedSrc = await getClippedImageNoAngle({
-    img: img,
-    clipInfo: nextSegmentClipInfo,
-    canvasWidth: ogImageWidth,
-    canvasHeight: ogImageHeight,
-  });
-  const nextSegmentImageAnchor = [0, 0.5];
-  const nextSegmentImage = createOlIconWithDataURL({
-    src: nextSegmentClippedSrc,
-    imgSize: [pImageWidth, pImageHeight],
-    scale: pImage.getScale(),
-    anchor: nextSegmentImageAnchor,
-  });
-  // const nextSegmentImage = new Icon({
-  //   src: nextSegmentClippedSrc,
-  //   imgSize: [pImageWidth, pImageHeight],
-  //   scale: pImage.getScale(),
-  //   anchor: nextSegmentImageAnchor,
-  //   anchorXUnits: 'fraction',
-  //   anchorYUnits: 'fraction',
-  // });
-  // nextSegmentImage.getImage(pPixelRatio).src = nextSegmentClippedSrc;
-
-  const nextSegmentRenderer = toContext(pRenderContext);
-
-  const nextSegmentRenderPoint = {
-    // ignore: true,
-    image: nextSegmentImage,
-    angle: gapCloserPointData.backwardPoint.angle,
-    coords: gapCloserPointData.backwardPoint.intersectCoords,
-    rendererToUse: nextSegmentRenderer,
-    geometryCoordIndex: currentGeometryCoordIndex,
-    isFirstAfterLeftTurn: true,
-    isClipped: nextSegmentCutRatio < 1,
-    clippedAtLength: nextSegmentCutLength,
-  };
-  // \2 - finished
-
-  const result = [
-    ...gapCloserRenderPoints,
-    nextSegmentRenderPoint,
-  ];
-  return result;
 }
 
-function getClippedImageForRightTurn(options) {
+function getClippedImageForTurn(options) {
   const img = options.img;
   const clipInfo = options.clipInfo;
   const canvasWidth = options.canvasWidth;
   const canvasHeight = options.canvasHeight;
+  const turnDirection = options.turnDirection;
+  const turnDirectionConfig = getTurnDirectionConfig(turnDirection);
 
   return new Promise((res, _) => {
     const canvas = document.createElement('canvas');
@@ -729,29 +637,34 @@ function getClippedImageForRightTurn(options) {
       isFirst: clipInfo.isFirst,
       img: img.src,
     });
-    if (USE_CACHING && clipInfoHashToBase64.rightTurn.has(clipInfoHashCode)) {
-      return res(clipInfoHashToBase64.rightTurn.get(clipInfoHashCode).base64);
+    const clipCache = clipInfoHashToBase64[turnDirectionConfig.clipCacheKey];
+    if (USE_CACHING && clipCache.has(clipInfoHashCode)) {
+      return res(clipCache.get(clipInfoHashCode).base64);
     }
 
     ctx.save();
     ctx.beginPath();
+    const edgeY = turnDirectionConfig.getEdgeY(canvasHeight);
+    const oppositeY = turnDirectionConfig.getOppositeY(canvasHeight);
+    const angledYOffset = turnDirectionConfig.angledYDirection
+      * Math.sin(clipInfo.cutAngle) * canvasDiagonal;
 
     if (clipInfo.isFirst) {
-      ctx.moveTo(0, 0);
-      ctx.lineTo(cutLength, 0);
+      ctx.moveTo(0, edgeY);
+      ctx.lineTo(cutLength, edgeY);
       const angledX = cutLength + Math.cos(Math.PI - clipInfo.cutAngle) * canvasDiagonal;
-      const angledY = Math.sin(clipInfo.cutAngle) * canvasDiagonal;
+      const angledY = edgeY + angledYOffset;
       ctx.lineTo(angledX, angledY);
-      ctx.lineTo(0, canvas.height);
+      ctx.lineTo(0, oppositeY);
       ctx.closePath();
       ctx.clip();
     } else {
-      ctx.moveTo(canvasWidth, 0);
-      ctx.lineTo(canvasWidth - cutLength, 0);
+      ctx.moveTo(canvasWidth, edgeY);
+      ctx.lineTo(canvasWidth - cutLength, edgeY);
       const angledX = canvasWidth - cutLength + Math.cos(clipInfo.cutAngle) * canvasDiagonal;
-      const angledY = Math.sin(clipInfo.cutAngle) * canvasDiagonal;
+      const angledY = edgeY + angledYOffset;
       ctx.lineTo(angledX, angledY);
-      ctx.lineTo(canvasWidth, canvasHeight);
+      ctx.lineTo(canvasWidth, oppositeY);
       ctx.closePath();
       ctx.clip();
     }
@@ -763,7 +676,7 @@ function getClippedImageForRightTurn(options) {
       const result = canvas.toDataURL();
       if (!isCanvasEmpty(result, canvasWidth, canvasHeight)) {
         // We don't cache empty canvasses
-        clipInfoHashToBase64.rightTurn.set(clipInfoHashCode, {
+        clipCache.set(clipInfoHashCode, {
           base64: result,
           clipInfo: clipInfo,
         });
@@ -777,98 +690,11 @@ function getClippedImageForRightTurn(options) {
         const result = canvas.toDataURL();
         if (!isCanvasEmpty(result, canvasWidth, canvasHeight)) {
           // We don't cache empty canvasses
-          clipInfoHashToBase64.rightTurn.set(clipInfoHashCode, {
+          clipCache.set(clipInfoHashCode, {
             base64: result,
             clipInfo: clipInfo,
           });
         }
-        res(result);
-      };
-    }
-  });
-}
-
-function getClippedImageForLeftTurn(options) {
-  const img = options.img;
-  const clipInfo = options.clipInfo;
-  const canvasWidth = options.canvasWidth;
-  const canvasHeight = options.canvasHeight;
-
-  return new Promise((res, _) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = canvasWidth;
-    canvas.height = canvasHeight;
-    const ctx = canvas.getContext('2d');
-    const cutLength = clipInfo.cutLength;
-    const canvasDiagonal = Math.sqrt(
-      (canvasWidth > cutLength
-        ? canvas.width ** 2
-        : cutLength ** 2) + canvas.height ** 2,
-    ); // This is the max distance within the canvas
-
-    const clipInfoHashCode = getHashCode({
-      angle: clipInfo.angle,
-      cutAngle: clipInfo.cutAngle,
-      cutLength: clipInfo.cutLength,
-      canvasDiagonal: clipInfo.canvasDiagonal,
-      isFirst: clipInfo.isFirst,
-      img: img.src,
-    });
-    if (USE_CACHING && clipInfoHashToBase64.leftTurn.has(clipInfoHashCode)) {
-      return res(clipInfoHashToBase64.leftTurn.get(clipInfoHashCode).base64);
-    }
-
-    ctx.save();
-    ctx.beginPath();
-
-    if (clipInfo.isFirst) {
-      ctx.moveTo(0, canvasHeight);
-      ctx.lineTo(cutLength, canvasHeight);
-      const angledX = cutLength + Math.cos(Math.PI - clipInfo.cutAngle) * canvasDiagonal;
-      const angledY = canvasHeight - Math.sin(clipInfo.cutAngle) * canvasDiagonal;
-      ctx.lineTo(angledX, angledY);
-      ctx.lineTo(0, 0);
-      ctx.closePath();
-      ctx.clip();
-    } else {
-      ctx.moveTo(canvasWidth, canvasHeight);
-      ctx.lineTo(canvasWidth - cutLength, canvasHeight);
-      const angledX = canvasWidth - cutLength + Math.cos(clipInfo.cutAngle) * canvasDiagonal;
-      const angledY = canvasHeight - Math.sin(clipInfo.cutAngle) * canvasDiagonal;
-      ctx.lineTo(angledX, angledY);
-      ctx.lineTo(canvasWidth, 0);
-      ctx.closePath();
-      ctx.clip();
-    }
-
-    if (img.complete) {
-      ctx.drawImage(img, 0, 0);
-      ctx.restore();
-
-      const result = canvas.toDataURL();
-      if (!isCanvasEmpty(result, canvasWidth, canvasHeight)) {
-        // We don't cache empty canvasses
-        clipInfoHashToBase64.leftTurn.set(clipInfoHashCode, {
-          base64: result,
-          clipInfo: clipInfo,
-        });
-      }
-
-      res(result);
-    } else {
-      img.onload = () => {
-        ctx.drawImage(img, 0, 0);
-        ctx.restore();
-
-        const result = canvas.toDataURL();
-        if (!isCanvasEmpty(result, canvasWidth, canvasHeight)) {
-          // We don't cache empty canvasses
-          clipInfoHashToBase64.leftTurn.set(clipInfoHashCode, {
-            base64: result,
-            clipInfo: clipInfo,
-          });
-        }
-
         res(result);
       };
     }
