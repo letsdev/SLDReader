@@ -278,6 +278,11 @@ async function renderStrokeMarks(
     });
 }
 
+/**
+ * Dispatch turn handling to the full-image or half-image path.
+ * @param {Object} options Per-split-point rendering context.
+ * @returns {Promise<Array<Object>>} Render data for the current split point.
+ */
 async function getNewPointsDataToRender(options) {
   if (options.isFullImg) {
     return getNewPointsDataToRenderForFullImg(options);
@@ -286,6 +291,12 @@ async function getNewPointsDataToRender(options) {
   return getNewPointsDataToRenderForHalfImg(options);
 }
 
+/**
+ * Build render data for full images, where both turn directions use the shared
+ * turn pipeline.
+ * @param {Object} options Per-split-point rendering context.
+ * @returns {Promise<Array<Object>>} Render data for the current split point.
+ */
 async function getNewPointsDataToRenderForFullImg(options) {
   const {
     isRightTurn,
@@ -308,6 +319,11 @@ async function getNewPointsDataToRenderForFullImg(options) {
   return newPointsDataToRender;
 }
 
+/**
+ * Build render data for half images, preserving the dedicated left-turn path.
+ * @param {Object} options Per-split-point rendering context.
+ * @returns {Promise<Array<Object>>} Render data for the current split point.
+ */
 async function getNewPointsDataToRenderForHalfImg(options) {
   const {
     i,
@@ -343,6 +359,13 @@ async function getNewPointsDataToRenderForHalfImg(options) {
   return newPointsDataToRender;
 }
 
+/**
+ * Invoke a turn handler with the normalized option structure used by right and
+ * left turns.
+ * @param {Object} options Per-split-point rendering context.
+ * @param {Function} turnHandler Turn-specific handler to execute.
+ * @returns {Promise<Array<Object>>} Render data for the turn.
+ */
 async function handleCurrentTurn(options, turnHandler) {
   return turnHandler(getTurnHandlerOptions(options, {
     splitPoint: options.point,
@@ -354,6 +377,11 @@ async function handleCurrentTurn(options, turnHandler) {
   }));
 }
 
+/**
+ * Choose between shortened-segment rendering and the unchanged render point.
+ * @param {Object} options Per-split-point rendering context.
+ * @returns {Promise<Array<Object>>} Render data for the current split point.
+ */
 async function getRegularOrUnchangedPointsData(options) {
   if (options.isRegularButShortened) {
     return handleRegularButShortened(getRegularButShortenedOptions(options));
@@ -362,6 +390,12 @@ async function getRegularOrUnchangedPointsData(options) {
   return [createUnchangedPointData(options)];
 }
 
+/**
+ * Build the shared option payload consumed by turn handlers.
+ * @param {Object} options Per-split-point rendering context.
+ * @param {Object} overrides Turn-specific overrides.
+ * @returns {Object} Normalized turn-handler options.
+ */
 function getTurnHandlerOptions(options, overrides = {}) {
   return {
     currentGeometryCoordIndex: options.currentGeometryCoordIndex,
@@ -377,6 +411,11 @@ function getTurnHandlerOptions(options, overrides = {}) {
   };
 }
 
+/**
+ * Build the option payload for shortened straight segments.
+ * @param {Object} options Per-split-point rendering context.
+ * @returns {Object} Options for shortened straight rendering.
+ */
 function getRegularButShortenedOptions(options) {
   return {
     point: options.point,
@@ -392,6 +431,12 @@ function getRegularButShortenedOptions(options) {
   };
 }
 
+/**
+ * Return the geometry coordinates adjacent to the current turn vertex.
+ * @param {Array<Array<number>>} pixelCoords Geometry coordinates in pixel space.
+ * @param {number} geometryCoordIndex Index of the current vertex.
+ * @returns {Object} Incoming coord, vertex coord, and outgoing coord.
+ */
 function getInvolvedGeometryCoords(pixelCoords, geometryCoordIndex) {
   return {
     coordOnFirstLine: pixelCoords[geometryCoordIndex - 1],
@@ -400,6 +445,11 @@ function getInvolvedGeometryCoords(pixelCoords, geometryCoordIndex) {
   };
 }
 
+/**
+ * Create render data for a split point that does not need special clipping.
+ * @param {Object} options Per-split-point rendering context.
+ * @returns {Object} Render data for the unchanged point.
+ */
 function createUnchangedPointData(options) {
   return {
     image: options.image,
@@ -410,6 +460,12 @@ function createUnchangedPointData(options) {
   };
 }
 
+/**
+ * Detect the synthetic closing turn of a polygon ring and collect the geometry
+ * data needed to render its gap filler.
+ * @param {Object} options Per-split-point rendering context.
+ * @returns {?Object} Closing-turn context or `null` when not applicable.
+ */
 function getPolygonClosingContext(options) {
   const {
     i,
@@ -452,6 +508,14 @@ function getPolygonClosingContext(options) {
   };
 }
 
+/**
+ * Append polygon-closing gap-fill render data when the current split point is
+ * the last one on a polygon ring.
+ * @param {Object} options Per-split-point rendering context.
+ * @param {Array<Object>} newPointsDataToRender Render data collected so far.
+ * @param {Object} policy Flags controlling which closing turns are supported.
+ * @returns {Promise<void>}
+ */
 async function appendPolygonClosingGapFillRenderData(options, newPointsDataToRender, policy) {
   const polygonClosingGapFillRenderData = await getPolygonClosingGapFillRenderData(options, policy);
   if (polygonClosingGapFillRenderData) {
@@ -459,6 +523,13 @@ async function appendPolygonClosingGapFillRenderData(options, newPointsDataToRen
   }
 }
 
+/**
+ * Create the gap-filling render data for the implicit closing turn of a polygon
+ * ring when supported by the active rendering policy.
+ * @param {Object} options Per-split-point rendering context.
+ * @param {Object} policy Flags controlling which closing turns are supported.
+ * @returns {Promise<?Array<Object>>} Gap-fill render data or `null`.
+ */
 async function getPolygonClosingGapFillRenderData(options, policy) {
   const polygonClosingContext = getPolygonClosingContext(options);
   if (!polygonClosingContext) {
@@ -480,6 +551,12 @@ async function getPolygonClosingGapFillRenderData(options, policy) {
   }));
 }
 
+/**
+ * Detect whether an icon contains visible content in the lower half and should
+ * therefore use the full-image rendering path.
+ * @param {Object} options Image and sizing information.
+ * @returns {Promise<boolean>} `true` when the image is treated as full.
+ */
 async function getIsFullImg(options) {
   const {
     image,
@@ -530,6 +607,13 @@ async function getIsFullImg(options) {
   return isFullImg;
 }
 
+/**
+ * Resolve the concrete image element used by an OpenLayers icon, waiting for it
+ * to load when necessary.
+ * @param {Icon} image OpenLayers icon style.
+ * @param {number} pixelRatio Current device pixel ratio.
+ * @returns {Promise<?(HTMLImageElement|HTMLCanvasElement)>} Loaded image element or `null`.
+ */
 function getLoadedImageElement(image, pixelRatio) {
   const imageElement = image.getImage(pixelRatio) || image.iconImage_?.image_;
   return new Promise(resolve => {
@@ -553,6 +637,11 @@ function getLoadedImageElement(image, pixelRatio) {
   });
 }
 
+/**
+ * Look up the direction-specific clipping and flag configuration for a turn.
+ * @param {'right'|'left'} turnDirection Requested turn direction.
+ * @returns {Object} Direction-specific config object.
+ */
 function getTurnDirectionConfig(turnDirection) {
   const turnDirectionConfig = TURN_DIRECTION_CONFIG[turnDirection];
 
@@ -563,6 +652,11 @@ function getTurnDirectionConfig(turnDirection) {
   return turnDirectionConfig;
 }
 
+/**
+ * Thin wrapper that routes right turns into the shared turn implementation.
+ * @param {Object} options Turn-rendering options.
+ * @returns {Promise<Array<Object>>} Render data for the turn.
+ */
 async function handleRightTurn(options) {
   return handleTurn({
     ...options,
@@ -570,6 +664,11 @@ async function handleRightTurn(options) {
   });
 }
 
+/**
+ * Render the shared turn pipeline used by right turns and full-image left turns.
+ * @param {Object} options Turn-rendering options.
+ * @returns {Promise<Array<Object>>} Render data for the turn.
+ */
 async function handleTurn(options) {
   const currentGeometryCoordIndex = options.currentGeometryCoordIndex;
   const pImage = options.pImage;
@@ -675,6 +774,12 @@ async function handleTurn(options) {
   return result;
 }
 
+/**
+ * Clip and render a straight segment whose available length is shorter than one
+ * full symbol width.
+ * @param {Object} options Shortened-segment rendering options.
+ * @returns {Promise<Array<Object>>} Render data for the shortened point.
+ */
 async function handleRegularButShortened(options) {
   const point = options.point;
   const gapSize = options.gapSize;
@@ -717,6 +822,12 @@ async function handleRegularButShortened(options) {
   return result;
 }
 
+/**
+ * Render the legacy half-image left-turn path by clipping the current point and
+ * retroactively adjusting the incoming segment.
+ * @param {Object} options Turn-rendering options.
+ * @returns {Promise<Array<Object>>} Render data for the current split point.
+ */
 async function handleHalfImageLeftTurn(options) {
   const {
     pixelCoords,
@@ -825,6 +936,12 @@ async function handleHalfImageLeftTurn(options) {
   ];
 }
 
+/**
+ * Render the first regular symbol after a half-image left turn, preserving the
+ * preexisting straight-segment clipping rules.
+ * @param {Object} options Per-split-point rendering context.
+ * @returns {Promise<Array<Object>>} Render data for the current split point.
+ */
 async function handleHalfImageFirstAfterLeftTurn(options) {
   const {
     i,
@@ -895,6 +1012,12 @@ async function handleHalfImageFirstAfterLeftTurn(options) {
   ];
 }
 
+/**
+ * Thin wrapper that routes full-image left turns into the shared turn
+ * implementation.
+ * @param {Object} options Turn-rendering options.
+ * @returns {Promise<Array<Object>>} Render data for the turn.
+ */
 async function handleLeftTurn(options) {
   return handleTurn({
     ...options,
@@ -902,6 +1025,12 @@ async function handleLeftTurn(options) {
   });
 }
 
+/**
+ * Clip an icon into one half of a corner using the shared turn geometry for the
+ * configured turn direction.
+ * @param {Object} options Clip inputs and canvas dimensions.
+ * @returns {Promise<string>} Data URL of the clipped image.
+ */
 function getClippedImageForTurn(options) {
   const img = options.img;
   const clipInfo = options.clipInfo;
@@ -994,6 +1123,12 @@ function getClippedImageForTurn(options) {
   });
 }
 
+/**
+ * Clip an icon into one half of a half-image left turn using the legacy
+ * left-turn polygon shape.
+ * @param {Object} options Clip inputs and canvas dimensions.
+ * @returns {Promise<string>} Data URL of the clipped image.
+ */
 function getClippedImageForLeftTurn(options) {
   const {
     img,
@@ -1098,6 +1233,12 @@ function getClippedImageForLeftTurn(options) {
   });
 }
 
+/**
+ * Clip an icon without any angled corner geometry, optionally trimming one or
+ * both straight ends.
+ * @param {Object} options Clip inputs and canvas dimensions.
+ * @returns {Promise<string>} Data URL of the clipped image.
+ */
 function getClippedImageNoAngle(options) {
   const img = options.img;
   const clipInfo = options.clipInfo;
@@ -1223,6 +1364,12 @@ function renderPoint(options) {
   renderToUse.drawPoint(pointToDraw);
 }
 
+/**
+ * Build a deterministic numeric hash for cache keys derived from shallow
+ * objects of primitive values.
+ * @param {Object} object Source object for the hash.
+ * @returns {number} Numeric hash code.
+ */
 function getHashCode(object) {
   if (!USE_CACHING) {
     return 1;
@@ -1266,6 +1413,14 @@ function getHashCode(object) {
   return hash;
 }
 
+/**
+ * Compare a canvas data URL against the cached empty-canvas output for the same
+ * dimensions.
+ * @param {string} canvasSrc Canvas data URL to test.
+ * @param {number} canvasWidth Canvas width in pixels.
+ * @param {number} canvasHeight Canvas height in pixels.
+ * @returns {boolean} `true` when the canvas is empty.
+ */
 function isCanvasEmpty(canvasSrc, canvasWidth, canvasHeight) {
   // if (!emptyCanvasSrc) {
   //   const emptyCanvas = document.createElement('canvas');
@@ -1295,6 +1450,12 @@ function isCanvasEmpty(canvasSrc, canvasWidth, canvasHeight) {
 
 }
 
+/**
+ * Create a DOM image element for a source URL so it can be used by the canvas
+ * clipping helpers.
+ * @param {string} src Image source URL or data URL.
+ * @returns {HTMLImageElement} Image element with the source assigned.
+ */
 function createDomImage(src) {
   const img = new Image();
   img.src = src;
@@ -1302,6 +1463,12 @@ function createDomImage(src) {
   return img;
 }
 
+/**
+ * Run a clipping helper and wrap the resulting data URL back into an OpenLayers
+ * icon with the requested anchor.
+ * @param {Object} options Clip configuration and source icon.
+ * @returns {Promise<Icon>} Clipped OpenLayers icon.
+ */
 async function clipToIcon(options) {
   const {
     imageStyle,
@@ -1332,10 +1499,20 @@ async function clipToIcon(options) {
   });
 }
 
+/**
+ * Resolve the source URL used by an OpenLayers icon style.
+ * @param {Icon} imageStyle OpenLayers icon style.
+ * @returns {string|undefined} Image source URL.
+ */
 function getImageStyleSrc(imageStyle) {
   return imageStyle.iconImage_?.src_ || imageStyle.getSrc?.();
 }
 
+/**
+ * Resolve the pixel size used by an OpenLayers icon style across OL versions.
+ * @param {Icon} imageStyle OpenLayers icon style.
+ * @returns {Array<number>|undefined} Image size as `[width, height]`.
+ */
 function getImageStyleSize(imageStyle) {
   return imageStyle.getSize?.()
     || imageStyle.imgSize_
