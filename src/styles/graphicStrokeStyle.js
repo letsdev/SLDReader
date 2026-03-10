@@ -317,20 +317,20 @@ async function getNewPointsDataToRenderForHalfImg(options) {
     isLeftTurn,
     isFirstOfSegment,
   } = options;
-  const isHalfImageFirstAfterLeftTurn = !isLeftTurn
+  const isFirstAfterLeftTurn = !isLeftTurn
     && !isRightTurn
     && !isFirstOfSegment
     && i > 1
     && splitPoints[i - 1].isLeftTurn;
 
-  point.isHalfImageFirstAfterLeftTurn = isHalfImageFirstAfterLeftTurn;
+  point.isFirstAfterLeftTurn = isFirstAfterLeftTurn;
 
   let newPointsDataToRender;
   if (isRightTurn) {
     newPointsDataToRender = await handleCurrentTurn(options, handleRightTurn);
   } else if (isLeftTurn) {
     newPointsDataToRender = await handleHalfImageLeftTurn(options);
-  } else if (isHalfImageFirstAfterLeftTurn) {
+  } else if (isFirstAfterLeftTurn) {
     newPointsDataToRender = await handleHalfImageFirstAfterLeftTurn(options);
   } else {
     newPointsDataToRender = await getRegularOrUnchangedPointsData(options);
