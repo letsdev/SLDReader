@@ -1459,7 +1459,6 @@ function isCanvasEmpty(canvasSrc, canvasWidth, canvasHeight) {
 function createDomImage(src) {
   const img = new Image();
   img.src = src;
-  document.body.appendChild(img);
   return img;
 }
 
